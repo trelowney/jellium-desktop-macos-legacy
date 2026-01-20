@@ -4,6 +4,9 @@
 #ifdef __APPLE__
 #include "platform/macos_layer.h"
 using VideoSurface = MacOSVideoLayer;
+#elif defined(_WIN32)
+#include "platform/windows_video_layer.h"
+using VideoSurface = WindowsVideoLayer;
 #else
 #include "platform/wayland_subsurface.h"
 using VideoSurface = WaylandSubsurface;
