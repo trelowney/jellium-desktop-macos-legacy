@@ -4,50 +4,51 @@
 #include <vulkan/vulkan.h>
 #include <wayland-client.h>
 #include "wayland-protocols/color-management-v1-client.h"
+#include "video_surface.h"
 #include <vector>
 
 struct SDL_Window;
 
-class WaylandSubsurface {
+class WaylandSubsurface : public VideoSurface {
 public:
     WaylandSubsurface();
-    ~WaylandSubsurface();
+    ~WaylandSubsurface() override;
 
     bool init(SDL_Window* window, VkInstance instance, VkPhysicalDevice physicalDevice,
               VkDevice device, uint32_t queueFamily,
               const char* const* extensions, int numExtensions,
-              const VkPhysicalDeviceFeatures2* features);
-    bool createSwapchain(int width, int height);
-    bool recreateSwapchain(int width, int height);
-    void cleanup();
+              const VkPhysicalDeviceFeatures2* features) override;
+    bool createSwapchain(int width, int height) override;
+    bool recreateSwapchain(int width, int height) override;
+    void cleanup() override;
 
     // Frame acquisition
-    bool startFrame(VkImage* outImage, VkImageView* outView, VkFormat* outFormat);
-    void submitFrame();
+    bool startFrame(VkImage* outImage, VkImageView* outView, VkFormat* outFormat) override;
+    void submitFrame() override;
 
     // Accessors
     wl_display* display() const { return wl_display_; }
     wl_surface* surface() const { return mpv_surface_; }
-    VkFormat swapchainFormat() const { return swapchain_format_; }
-    VkExtent2D swapchainExtent() const { return swapchain_extent_; }
-    bool isHdr() const { return is_hdr_; }
-    uint32_t width() const { return swapchain_extent_.width; }
-    uint32_t height() const { return swapchain_extent_.height; }
+    VkFormat swapchainFormat() const override { return swapchain_format_; }
+    VkExtent2D swapchainExtent() const override { return swapchain_extent_; }
+    bool isHdr() const override { return is_hdr_; }
+    uint32_t width() const override { return swapchain_extent_.width; }
+    uint32_t height() const override { return swapchain_extent_.height; }
 
     // Vulkan handles for mpv (our own device, not libplacebo)
-    VkInstance vkInstance() const { return instance_; }
-    VkPhysicalDevice vkPhysicalDevice() const { return physical_device_; }
-    VkDevice vkDevice() const { return device_; }
-    VkQueue vkQueue() const;
-    uint32_t vkQueueFamily() const;
-    PFN_vkGetInstanceProcAddr vkGetProcAddr() const { return vkGetInstanceProcAddr; }
-    const VkPhysicalDeviceFeatures2* features() const { return &features2_; }
-    const char* const* deviceExtensions() const;
-    int deviceExtensionCount() const;
+    VkInstance vkInstance() const override { return instance_; }
+    VkPhysicalDevice vkPhysicalDevice() const override { return physical_device_; }
+    VkDevice vkDevice() const override { return device_; }
+    VkQueue vkQueue() const override;
+    uint32_t vkQueueFamily() const override;
+    PFN_vkGetInstanceProcAddr vkGetProcAddr() const override { return vkGetInstanceProcAddr; }
+    const VkPhysicalDeviceFeatures2* features() const override { return &features2_; }
+    const char* const* deviceExtensions() const override;
+    int deviceExtensionCount() const override;
 
     void commit();
     void setColorspace();
-    void setVisible(bool visible);
+    void setVisible(bool visible) override;
 
     // Wayland registry callbacks (public for C callback struct)
     static void registryGlobal(void* data, wl_registry* registry,
