@@ -9,6 +9,7 @@ name = "jfn_paths"
 crate-type = ["rlib"]
 
 [dependencies]
+parking_lot.workspace = true
 tempfile.workspace = true
 
 [target.'cfg(unix)'.dependencies]
