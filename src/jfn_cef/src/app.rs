@@ -44,6 +44,7 @@ const DISABLED_FEATURES: &[&str] = &[
     "SpellCheck",
     "SpellCheckService",
     "PasswordManager",
+    "ImmersiveReadAnything",
 ];
 
 fn split_features(value: &str) -> impl Iterator<Item = String> + '_ {
