@@ -22,6 +22,10 @@ concurrency:
 
 env:
   MACOSX_DEPLOYMENT_TARGET: "12.0"
+  # pkg-config sees only MacPorts and our own source builds, never Homebrew.
+  PKG_CONFIG_LIBDIR: /opt/local/lib/pkgconfig:/opt/local/share/pkgconfig
+  # The app bundler copies dependencies from here instead of `brew --prefix`.
+  JFN_DEPS_PREFIX: /opt/local
 
 jobs:
   build:
@@ -42,28 +46,49 @@ jobs:
       - name: Lock CEF 150 (last macOS 12 release)
         run: cargo update --manifest-path src/Cargo.toml -p cef --precise 150.2.1
 
-      - name: Install dependencies
+      - name: Install build tools
+        run: brew install meson ninja nasm
+
+      # Homebrew bottles on this runner are built for macOS 14/26 and refuse to
+      # load on Monterey, so every library that ends up in the app bundle comes
+      # from MacPorts, compiled from source with a macOS 12 deployment target.
+      - name: Make /opt/local writable for the cache restore
+        run: sudo mkdir -p /opt/local && sudo chown "$(whoami)" /opt/local
+
+      - name: Cache MacPorts libraries
+        id: ports-cache
+        uses: actions/cache@v6
+        with:
+          path: /opt/local
+          key: macports-x86_64-macos${{ env.MACOSX_DEPLOYMENT_TARGET }}-v1
+
+      - name: Build libraries with MacPorts
+        if: steps.ports-cache.outputs.cache-hit != 'true'
         run: |
-          brew install \
-            meson \
-            ninja \
-            nasm \
-            libass \
-            luajit \
-            vulkan-loader \
-            vulkan-headers \
-            molten-vk \
-            sdl3 \
-            libunibreak \
-            zimg \
-            shaderc
+          os=$(sw_vers -productVersion | cut -d. -f1)
+          pkg=$(curl -fsSL https://api.github.com/repos/macports/macports-base/releases/latest \
+            | jq -r --arg os "-$os-" '.assets[] | select(.name | endswith(".pkg") and contains($os)) | .browser_download_url')
+          curl -fsSL -o /tmp/macports.pkg "$pkg"
+          sudo installer -pkg /tmp/macports.pkg -target /
+          export PATH="/opt/local/bin:/opt/local/sbin:$PATH"
+          printf '%s\n' \
+            "macosx_deployment_target ${MACOSX_DEPLOYMENT_TARGET}" \
+            'buildfromsource always' \
+            'build_arch x86_64' | sudo tee -a /opt/local/etc/macports/macports.conf
+          echo '-x11 +quartz' | sudo tee -a /opt/local/etc/macports/variants.conf
+          sudo port -N selfupdate
+          sudo port -N install \
+            libass lcms2 luajit zimg libjpeg-turbo \
+            vulkan-loader vulkan-headers MoltenVK shaderc
+          sudo port -N clean --all installed || true
+          sudo chown -R "$(whoami)" /opt/local
 
       - name: Cache built deps (ffmpeg + libplacebo)
         id: deps-cache
         uses: actions/cache@v6
         with:
           path: ~/jellyfin-deps
-          key: deps-x86_64-ffmpeg-n8.1-libplacebo-v7.360.1-macos${{ env.MACOSX_DEPLOYMENT_TARGET }}-v2
+          key: deps-x86_64-ffmpeg-n8.1-libplacebo-v7.360.1-macos${{ env.MACOSX_DEPLOYMENT_TARGET }}-macports-v3
 
       - name: Build ffmpeg from source
         if: steps.deps-cache.outputs.cache-hit != 'true'
@@ -79,8 +104,12 @@ jobs:
             --disable-programs \
             --disable-doc \
             --disable-debug \
-            --extra-cflags="-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET}" \
-            --extra-ldflags="-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET}"
+            --disable-xlib \
+            --disable-libxcb \
+            --disable-lzma \
+            --disable-sdl2 \
+            --extra-cflags="-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET} -I/opt/local/include" \
+            --extra-ldflags="-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET} -L/opt/local/lib"
           make -j$(sysctl -n hw.ncpu)
           make install
 
@@ -137,10 +166,24 @@ jobs:
 
       - name: Build app bundle
         run: |
-          export PKG_CONFIG_PATH="$HOME/jellyfin-deps/lib/pkgconfig:$PKG_CONFIG_PATH"
+          export PKG_CONFIG_LIBDIR="$HOME/jellyfin-deps/lib/pkgconfig:$PKG_CONFIG_LIBDIR"
           export CMAKE_OSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET}"
-          export CMAKE_PREFIX_PATH="$HOME/jellyfin-deps"
+          export CMAKE_PREFIX_PATH="$HOME/jellyfin-deps;/opt/local"
           cargo xtask install --prefix build/output
+
+      # No macOS 12 runner exists, so check what dyld on Monterey would check:
+      # every Mach-O in the bundle must declare a minimum OS of 12.x or lower.
+      - name: Verify every binary runs on macOS 12
+        run: |
+          bad=0
+          while IFS= read -r -d '' f; do
+            file -b "$f" | grep -q Mach-O || continue
+            v=$(otool -l "$f" | awk '/LC_BUILD_VERSION/{b=1} b&&/minos/{print $2; exit} /LC_VERSION_MIN_MACOSX/{m=1} m&&/version/{print $2; exit}')
+            printf '%-6s %s\n' "${v:-?}" "${f#build/output/}"
+            if [ -z "$v" ] || [ "${v%%.*}" -gt 12 ]; then bad=1; echo "::error::${f#build/output/} needs macOS ${v:-unknown}"; fi
+            otool -L "$f" | tail -n +2 | grep -E '/(usr/local|opt/homebrew)/' && { bad=1; echo "::error::${f#build/output/} links Homebrew"; }
+          done < <(find "build/output/Jellium Desktop.app" -type f -print0)
+          exit $bad
 
       - name: Create DMG
         run: |

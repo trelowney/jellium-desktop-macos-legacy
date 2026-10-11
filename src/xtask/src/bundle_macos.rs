@@ -360,6 +360,10 @@ fn install_name_tool(args: &[&str]) -> Result<()> {
 }
 
 fn brew_prefix() -> Result<PathBuf> {
+    // The macOS 12 build takes its libraries from MacPorts (/opt/local), not Homebrew.
+    if let Some(prefix) = std::env::var_os("JFN_DEPS_PREFIX") {
+        return Ok(PathBuf::from(prefix));
+    }
     let out = Command::new("brew")
         .arg("--prefix")
         .output()
