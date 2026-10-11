@@ -54,33 +54,63 @@ jobs:
       - name: Make /opt/local writable for the cache restore
         run: sudo mkdir -p /opt/local && sudo chown "$(whoami)" /opt/local
 
-      - name: Cache MacPorts libraries
-        id: ports-cache
-        uses: actions/cache@v6
+      # The first MacPorts build takes hours and may not finish inside the 6 h
+      # job limit, so it is resumable: a cut-off build is cached as it is, and
+      # the next run restores it and installs only the ports still missing.
+      - name: Restore MacPorts libraries
+        uses: actions/cache/restore@v6
         with:
           path: /opt/local
           key: macports-x86_64-macos${{ env.MACOSX_DEPLOYMENT_TARGET }}-v1
+          restore-keys: macports-x86_64-macos${{ env.MACOSX_DEPLOYMENT_TARGET }}-v1-
+
+      - name: Check MacPorts libraries
+        id: ports-check
+        run: test -f /opt/local/.ports-complete && echo "complete=true" >> "$GITHUB_OUTPUT" || true
 
       - name: Build libraries with MacPorts
-        if: steps.ports-cache.outputs.cache-hit != 'true'
+        id: ports
+        if: steps.ports-check.outputs.complete != 'true'
+        timeout-minutes: 240
         run: |
-          os=$(sw_vers -productVersion | cut -d. -f1)
-          pkg=$(curl -fsSL https://api.github.com/repos/macports/macports-base/releases/latest \
-            | jq -r --arg os "-$os-" '.assets[] | select(.name | endswith(".pkg") and contains($os)) | .browser_download_url')
-          curl -fsSL -o /tmp/macports.pkg "$pkg"
-          sudo installer -pkg /tmp/macports.pkg -target /
           export PATH="/opt/local/bin:/opt/local/sbin:$PATH"
-          printf '%s\n' \
-            "macosx_deployment_target ${MACOSX_DEPLOYMENT_TARGET}" \
-            'buildfromsource always' \
-            'build_arch x86_64' | sudo tee -a /opt/local/etc/macports/macports.conf
-          echo '-x11 +quartz' | sudo tee -a /opt/local/etc/macports/variants.conf
+          if [ ! -x /opt/local/bin/port ]; then
+            os=$(sw_vers -productVersion | cut -d. -f1)
+            pkg=$(curl -fsSL https://api.github.com/repos/macports/macports-base/releases/latest \
+              | jq -r --arg os "-$os-" '.assets[] | select(.name | endswith(".pkg") and contains($os)) | .browser_download_url')
+            curl -fsSL -o /tmp/macports.pkg "$pkg"
+            sudo installer -pkg /tmp/macports.pkg -target /
+            printf '%s\n' \
+              "macosx_deployment_target ${MACOSX_DEPLOYMENT_TARGET}" \
+              'buildfromsource always' \
+              'build_arch x86_64' | sudo tee -a /opt/local/etc/macports/macports.conf
+            echo '-x11 +quartz' | sudo tee -a /opt/local/etc/macports/variants.conf
+          fi
           sudo port -N selfupdate
           sudo port -N install \
             libass lcms2 luajit zimg libjpeg-turbo \
             vulkan-loader vulkan-headers MoltenVK shaderc
+          sudo touch /opt/local/.ports-complete
+
+      - name: Save MacPorts libraries
+        if: always() && (steps.ports.outcome == 'success' || steps.ports.outcome == 'failure' || steps.ports.outcome == 'cancelled')
+        run: |
           sudo port -N clean --all installed || true
+          sudo rm -rf /opt/local/var/macports/build
           sudo chown -R "$(whoami)" /opt/local
+
+      - name: Upload MacPorts cache
+        if: always() && (steps.ports.outcome == 'success' || steps.ports.outcome == 'failure' || steps.ports.outcome == 'cancelled')
+        uses: actions/cache/save@v6
+        with:
+          path: /opt/local
+          key: macports-x86_64-macos${{ env.MACOSX_DEPLOYMENT_TARGET }}-v1-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Stop if MacPorts is not finished yet
+        if: steps.ports.outcome != 'success' && steps.ports.outcome != 'skipped'
+        run: |
+          echo "::error::MacPorts did not finish within the time limit. The progress is cached; run the workflow again to continue."
+          exit 1
 
       - name: Cache built deps (ffmpeg + libplacebo)
         id: deps-cache
