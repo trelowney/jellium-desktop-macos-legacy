@@ -217,8 +217,22 @@ jobs:
             --title "macOS 12 Intel test build (${{ steps.version.outputs.version }})" \
             --notes "Experimental unsigned build for Intel Macs on macOS 12 Monterey (CEF 150). No RTX features on macOS. First launch: right-click the app, Open."
 
-  # Delete the CEF cache after each run; keep the ffmpeg/libplacebo deps cache
-  # (a source build takes ~20 min) until this branch is finished.
+      - name: Build machine
+        if: always()
+        run: |
+          {
+            echo "### Build machine"
+            echo "| | |"
+            echo "|---|---|"
+            echo "| CPU | $(sysctl -n machdep.cpu.brand_string) |"
+            echo "| Cores | $(sysctl -n hw.physicalcpu) physical, $(sysctl -n hw.logicalcpu) logical |"
+            echo "| RAM | $(( $(sysctl -n hw.memsize) / 1073741824 )) GB |"
+            echo "| Disk | $(df -h / | awk 'NR==2 {print $2 " total, " $4 " free"}') |"
+            echo "| macOS | $(sw_vers -productVersion) ($(uname -m)) |"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+  # Delete the CEF cache after each run; keep the MacPorts and ffmpeg/libplacebo
+  # caches, they are what makes later builds fast.
   cleanup-cache:
     needs: build
     if: always()
