@@ -6,15 +6,14 @@ name: build-macos-legacy
 # against the macOS 12 SDK. Apple Silicon Macs all run macOS 13+, so only
 # x86_64 is built here.
 
-# Fork: experimental, lives on the macos-legacy branch only. Pinned to CEF 150,
-# the last Chromium release that still supports macOS 12 (151 needs macOS 13).
-# Each run replaces the "macos-legacy-test" pre-release; pre-releases are not
-# returned by /releases/latest, so the Windows self-updater never sees it.
+# Pinned to CEF 150, the last Chromium release that still supports macOS 12
+# (151 needs macOS 13). Until versioned releases exist, each run replaces the
+# "test-build" pre-release.
 on:
   workflow_dispatch:
   push:
     branches:
-      - macos-legacy
+      - main
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -212,8 +211,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release delete macos-legacy-test --cleanup-tag --yes || true
-          gh release create macos-legacy-test dist/JelliumDesktop-*.dmg \
+          gh release delete test-build --cleanup-tag --yes || true
+          gh release create test-build dist/JelliumDesktop-*.dmg \
             --prerelease --target "$GITHUB_SHA" \
             --title "macOS 12 Intel test build (${{ steps.version.outputs.version }})" \
             --notes "Experimental unsigned build for Intel Macs on macOS 12 Monterey (CEF 150). No RTX features on macOS. First launch: right-click the app, Open."
