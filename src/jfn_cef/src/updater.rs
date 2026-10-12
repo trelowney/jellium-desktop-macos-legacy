@@ -105,6 +105,14 @@ fn spawn_macos_updater(dmg_url: &str, size: u64, version: &str) -> std::io::Resu
     use std::process::{Command, Stdio};
 
     const SCRIPT: &str = include_str!("macos_update.sh");
+    // The URL comes from page JavaScript. Only ever download a release of this
+    // repository, so a page can't make us install something else.
+    const RELEASES: &str =
+        "https://github.com/trelowney/jellium-desktop-macos-legacy/releases/download/";
+
+    if !dmg_url.starts_with(RELEASES) || !dmg_url.ends_with(".dmg") || dmg_url.contains("/../") {
+        return Err(Error::other(format!("refusing update from {dmg_url}")));
+    }
 
     // .../Jellium Desktop.app/Contents/MacOS/jellium-desktop -> the .app
     let exe = std::env::current_exe()?;
