@@ -105,6 +105,7 @@ fn start_macos_update(dmg_url: &str, size: u64, version: &str) -> std::io::Resul
     use std::io::Error;
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
 
     const SCRIPT: &str = include_str!("macos_update.sh");
@@ -133,7 +134,26 @@ fn start_macos_update(dmg_url: &str, size: u64, version: &str) -> std::io::Resul
     std::fs::write(&probe, b"")?;
     let _ = std::fs::remove_file(&probe);
 
+    // One update at a time (the startup check and a manual one can both
+    // offer it). A second request is ignored, not reported as an error: that
+    // would close the progress dialog of the update that is running.
+    static RUNNING: AtomicBool = AtomicBool::new(false);
+    if RUNNING.swap(true, Ordering::SeqCst) {
+        jfn_logging::log(
+            jfn_logging::Category::Cef,
+            jfn_logging::Level::Info,
+            "Update: already running; ignoring a second request",
+        );
+        return Ok(());
+    }
+
+    // $TMPDIR on macOS is per user (mode 700), so nobody else can plant this.
     let work = std::env::temp_dir().join(format!("jellium-update-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&work);
+    if let Err(e) = std::fs::create_dir(&work) {
+        RUNNING.store(false, Ordering::SeqCst);
+        return Err(e);
+    }
     let script = |args: &[&std::ffi::OsStr]| {
         let mut cmd = Command::new("/bin/bash");
         cmd.arg("-c")
@@ -152,7 +172,8 @@ fn start_macos_update(dmg_url: &str, size: u64, version: &str) -> std::io::Resul
         app.as_os_str(),
         work.as_os_str(),
     ])
-    .spawn()?;
+    .spawn()
+    .inspect_err(|_| RUNNING.store(false, Ordering::SeqCst))?;
 
     std::thread::spawn(move || {
         let dmg = work.join("update.dmg");
@@ -179,6 +200,7 @@ fn start_macos_update(dmg_url: &str, size: u64, version: &str) -> std::io::Resul
                 jfn_logging::Level::Warn,
                 "Update: download or copy failed; see ~/Library/Logs/Jellium Desktop/update.log",
             );
+            RUNNING.store(false, Ordering::SeqCst);
             report_progress("error", 0, 0);
             return;
         }
@@ -210,6 +232,7 @@ fn start_macos_update(dmg_url: &str, size: u64, version: &str) -> std::io::Resul
                     &format!("Update: could not start the final step: {e}"),
                 );
                 let _ = std::fs::remove_dir_all(app.with_extension("app.new"));
+                RUNNING.store(false, Ordering::SeqCst);
                 report_progress("error", 0, 0);
             }
         }
