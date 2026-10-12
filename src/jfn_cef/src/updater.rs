@@ -105,25 +105,7 @@ fn spawn_macos_updater(dmg_url: &str, size: u64, version: &str) -> std::io::Resu
     use std::process::{Command, Stdio};
 
     const SCRIPT: &str = include_str!("macos_update.sh");
-    // The URL comes from page JavaScript. Only ever download a release of this
-    // repository, so a page can't make us install something else.
-    const RELEASES: &str =
-        "https://github.com/trelowney/jellium-desktop-macos-legacy/releases/download/";
-
-    if !dmg_url.starts_with(RELEASES) || !dmg_url.ends_with(".dmg") || dmg_url.contains("/../") {
-        return Err(Error::other(format!("refusing update from {dmg_url}")));
-    }
-    // ...and only a release newer than this one, so it can't be downgraded.
-    let tag = dmg_url[RELEASES.len()..]
-        .split('/')
-        .next()
-        .unwrap_or_default();
-    if tag != version || !is_newer_release(tag, crate::APP_RELEASE_TAG) {
-        return Err(Error::other(format!(
-            "refusing update to {tag} (offered as {version}, running {})",
-            crate::APP_RELEASE_TAG
-        )));
-    }
+    check_update_url(dmg_url, version, MACOS_RELEASES, ".dmg")?;
 
     // .../Jellium Desktop.app/Contents/MacOS/jellium-desktop -> the .app
     let exe = std::env::current_exe()?;
@@ -171,6 +153,8 @@ fn spawn_updater(zip_url: &str, size: u64, version: &str) -> std::io::Result<()>
     use std::os::windows::process::CommandExt;
     use std::process::Command;
 
+    check_update_url(zip_url, version, WINDOWS_RELEASES, ".zip")?;
+
     let exe = std::env::current_exe()?;
     let dir = exe
         .parent()
@@ -213,9 +197,58 @@ fn spawn_updater(zip_url: &str, size: u64, version: &str) -> std::io::Result<()>
     }
 }
 
+/// Where each build's releases are downloaded from.
+#[cfg(target_os = "windows")]
+const WINDOWS_RELEASES: &str =
+    "https://github.com/trelowney/jellium-desktop-rtx/releases/download/";
+#[cfg(target_os = "macos")]
+const MACOS_RELEASES: &str =
+    "https://github.com/trelowney/jellium-desktop-macos-legacy/releases/download/";
+
+/// The URL comes from page JavaScript, i.e. from whatever the server serves.
+/// Only ever install an asset of this build's own releases, and only a release
+/// newer than the running one, so a page can neither make us install something
+/// else nor downgrade us.
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+fn check_update_url(url: &str, version: &str, releases: &str, ext: &str) -> std::io::Result<()> {
+    use std::io::Error;
+    let tag = release_asset_tag(url, releases, ext)
+        .ok_or_else(|| Error::other(format!("refusing update from {url}")))?;
+    if tag != version || !is_newer_release(tag, crate::APP_RELEASE_TAG) {
+        return Err(Error::other(format!(
+            "refusing update to {tag} (offered as {version}, running {})",
+            crate::APP_RELEASE_TAG
+        )));
+    }
+    Ok(())
+}
+
+/// The tag of a release download URL of exactly the form
+/// `<releases><tag>/<name><ext>`, where the tag and file name use only plain
+/// characters. Anything else (query strings, fragments, escapes, `..`,
+/// extra path segments) is rejected rather than interpreted.
+#[cfg(any(target_os = "windows", target_os = "macos", test))]
+fn release_asset_tag<'a>(url: &'a str, releases: &str, ext: &str) -> Option<&'a str> {
+    let (tag, name) = url.strip_prefix(releases)?.split_once('/')?;
+    let plain = |s: &str, extra: &[char]| {
+        !s.is_empty()
+            && s.chars()
+                .all(|c| c.is_ascii_alphanumeric() || extra.contains(&c))
+    };
+    // GitHub escapes the `+` of a build-metadata version (`0.1.0-dev+1fa8e8b`)
+    // as `%2B`; that is the only escape allowed.
+    let name = name.replace("%2B", "+");
+    let ok = plain(tag, &['.'])
+        && name.ends_with(ext)
+        && plain(&name, &['.', '-', '_', '+'])
+        && !name.starts_with('.');
+    ok.then_some(tag)
+}
+
 /// `vYYYY.MM.DD[.N]` tags compared number by number (so `.10` follows `.9`).
-/// A tag that doesn't parse is never newer.
-#[cfg(any(target_os = "macos", test))]
+/// A tag that doesn't parse is never newer, and nothing is newer than a build
+/// without a release tag (test builds don't update).
+#[cfg(any(target_os = "windows", target_os = "macos", test))]
 fn is_newer_release(candidate: &str, current: &str) -> bool {
     fn parts(tag: &str) -> Option<Vec<u32>> {
         tag.strip_prefix('v')?
@@ -225,14 +258,13 @@ fn is_newer_release(candidate: &str, current: &str) -> bool {
     }
     match (parts(candidate), parts(current)) {
         (Some(c), Some(cur)) => c > cur,
-        (Some(_), None) => current.is_empty(),
         _ => false,
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::is_newer_release;
+    use super::{is_newer_release, release_asset_tag};
 
     #[test]
     fn release_tags_compare_by_number() {
@@ -243,6 +275,34 @@ mod tests {
         assert!(!is_newer_release("v2026.09.30", "v2026.10.12"));
         assert!(!is_newer_release("v2026.10.13-rc1", "v2026.10.12"));
         assert!(!is_newer_release("latest", "v2026.10.12"));
-        assert!(is_newer_release("v2026.10.12", ""));
+        assert!(!is_newer_release("v2026.10.12", ""));
+    }
+
+    #[test]
+    fn only_plain_release_asset_urls_are_accepted() {
+        const R: &str = "https://github.com/o/r/releases/download/";
+        fn tag(u: &str) -> Option<&str> {
+            release_asset_tag(u, R, ".dmg")
+        }
+        assert_eq!(
+            tag(&format!(
+                "{R}v2026.10.13/JelliumDesktop-2026.10.13-macos-12-x86_64.dmg"
+            )),
+            Some("v2026.10.13")
+        );
+        assert_eq!(
+            tag("https://github.com/o/r/releases/download.evil/v1/a.dmg"),
+            None
+        );
+        assert_eq!(tag(&format!("{R}v1/../../x/a.dmg")), None);
+        assert_eq!(tag(&format!("{R}v1/%2e%2e/a.dmg")), None);
+        assert_eq!(tag(&format!("{R}v1/a.zip?x=.dmg")), None);
+        assert_eq!(tag(&format!("{R}v1/a.dmg#x")), None);
+        assert_eq!(tag(&format!("{R}v1/.dmg")), None);
+        assert_eq!(tag(&format!("{R}/a.dmg")), None);
+        assert_eq!(
+            tag("http://github.com/o/r/releases/download/v1/a.dmg"),
+            None
+        );
     }
 }
