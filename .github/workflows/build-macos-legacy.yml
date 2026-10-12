@@ -61,8 +61,8 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: /opt/local
-          key: macports-x86_64-macos${{ env.MACOSX_DEPLOYMENT_TARGET }}-v1
-          restore-keys: macports-x86_64-macos${{ env.MACOSX_DEPLOYMENT_TARGET }}-v1-
+          key: macports-x86_64-macos${{ env.MACOSX_DEPLOYMENT_TARGET }}-v2
+          restore-keys: macports-x86_64-macos${{ env.MACOSX_DEPLOYMENT_TARGET }}-v2-
 
       - name: Check MacPorts libraries
         id: ports-check
@@ -84,7 +84,9 @@ jobs:
               "macosx_deployment_target ${MACOSX_DEPLOYMENT_TARGET}" \
               'buildfromsource always' \
               'build_arch x86_64' | sudo tee -a /opt/local/etc/macports/macports.conf
-            echo '-x11 +quartz' | sudo tee -a /opt/local/etc/macports/variants.conf
+            # -yjit: shaderc's docs need asciidoctor -> ruby, and ruby's YJIT would
+            # pull in a from-source Rust compiler (2+ hours). Nothing of it ships.
+            echo '-x11 +quartz -yjit' | sudo tee -a /opt/local/etc/macports/variants.conf
           fi
           sudo port -N selfupdate
           sudo port -N install \
@@ -113,7 +115,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: /opt/local
-          key: macports-x86_64-macos${{ env.MACOSX_DEPLOYMENT_TARGET }}-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          key: macports-x86_64-macos${{ env.MACOSX_DEPLOYMENT_TARGET }}-v2-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Stop if MacPorts is not finished yet
         if: steps.ports.outcome != 'success' && steps.ports.outcome != 'skipped'
