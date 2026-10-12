@@ -10,8 +10,6 @@ Windows build are listed in the
 ### Changed
 - **The update shows its progress.** After *Update now* the dialog stays open with a progress bar (*Downloading … MB*, *Installing…*, *Restarting…*); the app downloads and copies the new version while it keeps running and only quits for the final swap, which takes a moment. Before, it quit right away and worked in the background with nothing on screen. If the update fails, the dialog closes and the app keeps running.
 
-## 2026-10-12.2
-
 ### Added
 - **The app reopens the way you closed it**: fullscreen if you quit in fullscreen, otherwise in a window with its last size and position (which it already remembered).
 
