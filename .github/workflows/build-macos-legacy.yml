@@ -95,9 +95,18 @@ jobs:
       - name: Save MacPorts libraries
         if: always() && (steps.ports.outcome == 'success' || steps.ports.outcome == 'failure' || steps.ports.outcome == 'cancelled')
         run: |
-          sudo port -N clean --all installed || true
+          # sudo resets PATH, so call port by its full path.
+          sudo /opt/local/bin/port -N clean --all installed || true
           sudo rm -rf /opt/local/var/macports/build
           sudo chown -R "$(whoami)" /opt/local
+          # Some ports install files the owner can't read (dbus-daemon-launch-helper
+          # is 4750 root:messagebus); tar would fail on them and nothing would be saved.
+          chmod -R u+rwX /opt/local
+          unreadable=$(find /opt/local ! -perm -u=r | head -5)
+          if [ -n "$unreadable" ]; then
+            echo "::error::Files the cache can't read: $unreadable"
+            exit 1
+          fi
 
       - name: Upload MacPorts cache
         if: always() && (steps.ports.outcome == 'success' || steps.ports.outcome == 'failure' || steps.ports.outcome == 'cancelled')
