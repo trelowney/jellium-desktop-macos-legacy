@@ -49,7 +49,7 @@ fail() {
     exit 1
 }
 
-notify "Downloading version $version…"
+notify "Downloading version ${version}…"
 # HTTPS only, redirects included (CI's test reads a local file:// DMG).
 proto="=https"
 [ -n "$testing" ] && proto="=https,file"
@@ -72,7 +72,7 @@ if kill -0 "$pid" 2>/dev/null; then
     sleep 1
 fi
 
-notify "Installing version $version…"
+notify "Installing version ${version}…"
 mkdir -p "$mnt"
 hdiutil attach -nobrowse -readonly -noautoopen -mountpoint "$mnt" "$work/update.dmg" >/dev/null \
     || fail "The downloaded disk image could not be opened."
