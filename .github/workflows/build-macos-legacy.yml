@@ -269,17 +269,27 @@ jobs:
         run: |
           dmg=$(ls dist/*.dmg)
           dest="$RUNNER_TEMP/Applications/Jellium Desktop.app"
+          work="$RUNNER_TEMP/jellium-update"
+          log="$HOME/Library/Logs/Jellium Desktop/update.log"
           mkdir -p "$(dirname "$dest")"
           ditto "build/output/Jellium Desktop.app" "$dest"
           touch "$dest/Contents/old-version-marker"
+          export JFN_UPDATE_TEST=1
+          # Step 1 runs while the app is still open: download + copy only.
+          bash src/jfn_cef/src/macos_update.sh prepare \
+            "file://$PWD/$dmg" "$(stat -f%z "$dmg")" "$dest" "$work" \
+            || { cat "$log"; exit 1; }
+          test -e "$dest/Contents/old-version-marker"
+          test -x "$dest.new/Contents/MacOS/jellium-desktop"
+          # Step 2 after the app quit: a stand-in process plays the app.
           sleep 2 & pid=$!
-          JFN_UPDATE_TEST=1 bash src/jfn_cef/src/macos_update.sh \
-            "file://$PWD/$dmg" "$(stat -f%z "$dmg")" "$pid" "$dest" "test" \
-            || { cat "$HOME/Library/Logs/Jellium Desktop/update.log"; exit 1; }
-          cat "$HOME/Library/Logs/Jellium Desktop/update.log"
+          bash src/jfn_cef/src/macos_update.sh finish "$pid" "$dest" "$work" \
+            || { cat "$log"; exit 1; }
+          cat "$log"
           test ! -e "$dest/Contents/old-version-marker"
           test -x "$dest/Contents/MacOS/jellium-desktop"
           test ! -e "$dest.new"
+          test ! -e "$work"
           diff -rq "build/output/Jellium Desktop.app" "$dest"
           rm -rf "$RUNNER_TEMP/Applications"
 

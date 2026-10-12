@@ -65,24 +65,15 @@ pub(crate) fn apply_update(zip_url: &str, size: u64, version: &str) {
     }
     #[cfg(target_os = "macos")]
     {
-        // `zip_url` is the release DMG here. The script waits for us to exit
-        // (and kills us after 30 s if we don't), so a plain shutdown is enough.
-        match spawn_macos_updater(zip_url, size, version) {
-            Ok(()) => {
-                jfn_logging::log(
-                    jfn_logging::Category::Cef,
-                    jfn_logging::Level::Info,
-                    "Update: update script started; quitting to apply",
-                );
-                jfn_playback::shutdown::jfn_shutdown_initiate();
-            }
-            Err(e) => {
-                jfn_logging::log(
-                    jfn_logging::Category::Cef,
-                    jfn_logging::Level::Warn,
-                    &format!("Update: could not start the update: {e}"),
-                );
-            }
+        // `zip_url` is the release DMG here. Download and copy happen while we
+        // keep running and show progress; we only quit for the final swap.
+        if let Err(e) = start_macos_update(zip_url, size, version) {
+            jfn_logging::log(
+                jfn_logging::Category::Cef,
+                jfn_logging::Level::Warn,
+                &format!("Update: could not start the update: {e}"),
+            );
+            report_progress("error", 0, 0);
         }
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
@@ -96,13 +87,25 @@ pub(crate) fn apply_update(zip_url: &str, size: u64, version: &str) {
     }
 }
 
-/// Download, swap and relaunch run in `macos_update.sh`, detached into its own
-/// process group so it outlives the app.
+/// Tell the page's update dialog how far we are: `phase` is "download"
+/// (`done` of `total` bytes), "install", "restart" or "error".
 #[cfg(target_os = "macos")]
-fn spawn_macos_updater(dmg_url: &str, size: u64, version: &str) -> std::io::Result<()> {
+fn report_progress(phase: &str, done: u64, total: u64) {
+    jfn_playback::exec_js::jfn_playback_exec_web_js(&format!(
+        "window.__jfnUpdateProgress && window.__jfnUpdateProgress('{phase}', {done}, {total});"
+    ));
+}
+
+/// The update runs `macos_update.sh` twice: `prepare` (download + copy the
+/// new app next to the old one) while we keep running and report progress,
+/// then `finish` (swap + relaunch), detached into its own process group so it
+/// outlives us, right before we quit.
+#[cfg(target_os = "macos")]
+fn start_macos_update(dmg_url: &str, size: u64, version: &str) -> std::io::Result<()> {
     use std::io::Error;
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
+    use std::time::Duration;
 
     const SCRIPT: &str = include_str!("macos_update.sh");
     check_update_url(dmg_url, version, MACOS_RELEASES, ".dmg")?;
@@ -130,21 +133,88 @@ fn spawn_macos_updater(dmg_url: &str, size: u64, version: &str) -> std::io::Resu
     std::fs::write(&probe, b"")?;
     let _ = std::fs::remove_file(&probe);
 
-    Command::new("/bin/bash")
-        .arg("-c")
-        .arg(SCRIPT)
-        .arg("jellium-update")
-        .arg(dmg_url)
-        .arg(size.to_string())
-        .arg(std::process::id().to_string())
-        .arg(&app)
-        .arg(version)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+    let work = std::env::temp_dir().join(format!("jellium-update-{}", std::process::id()));
+    let script = |args: &[&std::ffi::OsStr]| {
+        let mut cmd = Command::new("/bin/bash");
+        cmd.arg("-c")
+            .arg(SCRIPT)
+            .arg("jellium-update")
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        cmd
+    };
+    let mut prepare = script(&[
+        "prepare".as_ref(),
+        dmg_url.as_ref(),
+        size.to_string().as_ref(),
+        app.as_os_str(),
+        work.as_os_str(),
+    ])
+    .spawn()?;
+
+    std::thread::spawn(move || {
+        let dmg = work.join("update.dmg");
+        // The script deletes the DMG once copied, so remember we got past it.
+        let mut downloaded = false;
+        let status = loop {
+            match prepare.try_wait() {
+                Ok(Some(status)) => break Some(status),
+                Ok(None) => {}
+                Err(_) => break None,
+            }
+            let got = std::fs::metadata(&dmg).map_or(0, |m| m.len());
+            downloaded |= size > 0 && got >= size;
+            if downloaded {
+                report_progress("install", 0, 0);
+            } else {
+                report_progress("download", got, size);
+            }
+            std::thread::sleep(Duration::from_millis(250));
+        };
+        if !status.is_some_and(|s| s.success()) {
+            jfn_logging::log(
+                jfn_logging::Category::Cef,
+                jfn_logging::Level::Warn,
+                "Update: download or copy failed; see ~/Library/Logs/Jellium Desktop/update.log",
+            );
+            report_progress("error", 0, 0);
+            return;
+        }
+        report_progress("restart", 0, 0);
+        let pid = std::process::id().to_string();
+        match script(&[
+            "finish".as_ref(),
+            pid.as_ref(),
+            app.as_os_str(),
+            work.as_os_str(),
+        ])
         .process_group(0)
         .spawn()
-        .map(|_| ())
+        {
+            Ok(_) => {
+                jfn_logging::log(
+                    jfn_logging::Category::Cef,
+                    jfn_logging::Level::Info,
+                    "Update: new version ready; quitting to swap it in",
+                );
+                // The script waits for us to exit (and kills us after 30 s if
+                // we don't), so a plain shutdown is enough.
+                jfn_playback::shutdown::jfn_shutdown_initiate();
+            }
+            Err(e) => {
+                jfn_logging::log(
+                    jfn_logging::Category::Cef,
+                    jfn_logging::Level::Warn,
+                    &format!("Update: could not start the final step: {e}"),
+                );
+                let _ = std::fs::remove_dir_all(app.with_extension("app.new"));
+                report_progress("error", 0, 0);
+            }
+        }
+    });
+    Ok(())
 }
 
 #[cfg(target_os = "windows")]

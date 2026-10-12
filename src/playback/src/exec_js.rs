@@ -23,6 +23,12 @@ pub(crate) fn call(js: &str) {
     }
 }
 
+/// Run `js` in the embedded web view (from any thread); a no-op before the
+/// handler is installed.
+pub fn jfn_playback_exec_web_js(js: &str) {
+    call(js);
+}
+
 /// Install / clear the exec_js callback. `cb == None` clears.
 pub fn jfn_playback_set_web_exec_js_handler(cb: Option<ExecJsCb>) {
     *slot().lock() = cb;
