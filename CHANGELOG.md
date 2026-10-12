@@ -5,6 +5,11 @@ are published from the matching section below. Changes that come from the
 Windows build are listed in the
 [Jellium Desktop RTX changelog](https://github.com/trelowney/jellium-desktop-rtx/blob/main/CHANGELOG.md).
 
+## 2026-10-12.1
+
+### Fixed
+- **Dropdowns in jellyfin-web's settings** (for example *Media segment actions*) didn't take the option you picked: *Skip* only applied after another click, and *Ask to skip* turned into *Skip* and could not be changed. Dropdowns now open as an in-page menu, the same one the Windows build uses, instead of a native macOS menu.
+
 ## 2026-10-12
 
 First release for Intel Macs on macOS 12 Monterey, based on Jellium Desktop RTX

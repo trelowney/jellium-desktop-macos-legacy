@@ -565,8 +565,15 @@ impl Platform for MacosPlatform {
         macos_apply_stack(ordered.as_ptr() as *const *mut c_void, ordered.len());
     }
 
-    fn menu_delivery(&self, _kind: MenuKind) -> MenuDelivery<'_> {
-        MenuDelivery::Host(&crate::menu::NsMenuHost)
+    fn menu_delivery(&self, kind: MenuKind) -> MenuDelivery<'_> {
+        match kind {
+            MenuKind::ContextMenu => MenuDelivery::Host(&crate::menu::NsMenuHost),
+            // Dropdowns render in the page (select-menu.js), as on X11 and
+            // Windows. Through the native NSMenu a pick often didn't reach the
+            // page: the <select> kept its old value or snapped back to another
+            // option.
+            MenuKind::Dropdown => MenuDelivery::Page,
+        }
     }
 
     fn mpv_host(&self) -> &dyn jfn_platform_abi::MpvHost {
