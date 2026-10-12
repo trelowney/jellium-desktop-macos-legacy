@@ -5,6 +5,11 @@ are published from the matching section below. Changes that come from the
 Windows build are listed in the
 [Jellium Desktop RTX changelog](https://github.com/trelowney/jellium-desktop-rtx/blob/main/CHANGELOG.md).
 
+## 2026-10-12.3
+
+### Changed
+- **The update shows its progress.** After *Update now* the dialog stays open with a progress bar (*Downloading … MB*, *Installing…*, *Restarting…*); the app downloads and copies the new version while it keeps running and only quits for the final swap, which takes a moment. Before, it quit right away and worked in the background with nothing on screen. If the update fails, the dialog closes and the app keeps running.
+
 ## 2026-10-12.2
 
 ### Added

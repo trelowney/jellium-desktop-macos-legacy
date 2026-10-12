@@ -616,7 +616,42 @@
                 btn.textContent = 'Downloading & restarting…';
                 btn.disabled = true;
                 later.disabled = true;
-                if (window.jmpNative && window.jmpNative.applyUpdate) {
+                if (isMac && window.jmpNative && window.jmpNative.applyUpdate) {
+                    // macOS: the app downloads and copies the new version while
+                    // it keeps running and reports back here; it only quits for
+                    // the final swap, so the progress stays visible.
+                    const bar = document.createElement('div');
+                    bar.style.cssText = 'margin:0 22px 20px';
+                    bar.innerHTML =
+                        '<div id="rtxUpdText" style="font-size:.9em;opacity:.85;margin-bottom:8px">Starting the download…</div>' +
+                        '<div style="height:8px;background:#333;border-radius:4px;overflow:hidden">' +
+                          '<div id="rtxUpdBar" style="height:100%;width:0;background:#3da639;transition:width .25s"></div>' +
+                        '</div>';
+                    btn.parentNode.replaceWith(bar);
+                    const text = bar.querySelector('#rtxUpdText');
+                    const fill = bar.querySelector('#rtxUpdBar');
+                    const mb = (n) => (n / 1048576).toFixed(0);
+                    window.__jfnUpdateProgress = (phase, done, total) => {
+                        if (phase === 'download') {
+                            const pct = total > 0 ? Math.min(100, Math.round(done * 100 / total)) : 0;
+                            fill.style.width = pct + '%';
+                            text.textContent = total > 0
+                                ? 'Downloading ' + rel.tag_name + '… ' + mb(done) + ' of ' + mb(total) + ' MB'
+                                : 'Downloading ' + rel.tag_name + '…';
+                        } else if (phase === 'install') {
+                            fill.style.width = '100%';
+                            text.textContent = 'Installing…';
+                        } else if (phase === 'restart') {
+                            fill.style.width = '100%';
+                            text.textContent = 'Restarting…';
+                        } else if (phase === 'error') {
+                            window.__jfnUpdateProgress = null;
+                            back.remove();
+                            showToast('Update failed — download it from the Releases page');
+                        }
+                    };
+                    window.jmpNative.applyUpdate(asset.browser_download_url, String(asset.size || 0), rel.tag_name || '');
+                } else if (window.jmpNative && window.jmpNative.applyUpdate) {
                     // url, size (bytes, for the progress bar), version tag.
                     window.jmpNative.applyUpdate(asset.browser_download_url, String(asset.size || 0), rel.tag_name || '');
                     // Safety net: when the hand-off works the app exits within a
