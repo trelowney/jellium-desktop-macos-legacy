@@ -113,6 +113,17 @@ fn spawn_macos_updater(dmg_url: &str, size: u64, version: &str) -> std::io::Resu
     if !dmg_url.starts_with(RELEASES) || !dmg_url.ends_with(".dmg") || dmg_url.contains("/../") {
         return Err(Error::other(format!("refusing update from {dmg_url}")));
     }
+    // ...and only a release newer than this one, so it can't be downgraded.
+    let tag = dmg_url[RELEASES.len()..]
+        .split('/')
+        .next()
+        .unwrap_or_default();
+    if tag != version || !is_newer_release(tag, crate::APP_RELEASE_TAG) {
+        return Err(Error::other(format!(
+            "refusing update to {tag} (offered as {version}, running {})",
+            crate::APP_RELEASE_TAG
+        )));
+    }
 
     // .../Jellium Desktop.app/Contents/MacOS/jellium-desktop -> the .app
     let exe = std::env::current_exe()?;
@@ -199,5 +210,39 @@ fn spawn_updater(zip_url: &str, size: u64, version: &str) -> std::io::Result<()>
     match spawn(CREATE_BREAKAWAY_FROM_JOB) {
         Ok(_) => Ok(()),
         Err(_) => spawn(0).map(|_| ()),
+    }
+}
+
+/// `vYYYY.MM.DD[.N]` tags compared number by number (so `.10` follows `.9`).
+/// A tag that doesn't parse is never newer.
+#[cfg(any(target_os = "macos", test))]
+fn is_newer_release(candidate: &str, current: &str) -> bool {
+    fn parts(tag: &str) -> Option<Vec<u32>> {
+        tag.strip_prefix('v')?
+            .split('.')
+            .map(|p| p.parse().ok())
+            .collect()
+    }
+    match (parts(candidate), parts(current)) {
+        (Some(c), Some(cur)) => c > cur,
+        (Some(_), None) => current.is_empty(),
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_newer_release;
+
+    #[test]
+    fn release_tags_compare_by_number() {
+        assert!(is_newer_release("v2026.10.13", "v2026.10.12"));
+        assert!(is_newer_release("v2026.10.12.1", "v2026.10.12"));
+        assert!(is_newer_release("v2026.10.12.10", "v2026.10.12.9"));
+        assert!(!is_newer_release("v2026.10.12", "v2026.10.12"));
+        assert!(!is_newer_release("v2026.09.30", "v2026.10.12"));
+        assert!(!is_newer_release("v2026.10.13-rc1", "v2026.10.12"));
+        assert!(!is_newer_release("latest", "v2026.10.12"));
+        assert!(is_newer_release("v2026.10.12", ""));
     }
 }
