@@ -50,7 +50,11 @@ fail() {
 }
 
 notify "Downloading version $version…"
-curl -fL --retry 3 --connect-timeout 20 -o "$work/update.dmg" "$url" \
+# HTTPS only, redirects included (CI's test reads a local file:// DMG).
+proto="=https"
+[ -n "$testing" ] && proto="=https,file"
+curl -fL --proto "$proto" --proto-redir =https --retry 3 --connect-timeout 20 \
+    -o "$work/update.dmg" -- "$url" \
     || fail "The download failed."
 got=$(stat -f%z "$work/update.dmg")
 if [ "$size" -gt 0 ] && [ "$got" != "$size" ]; then
