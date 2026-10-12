@@ -7,13 +7,16 @@ name: build-macos-legacy
 # x86_64 is built here.
 
 # Pinned to CEF 150, the last Chromium release that still supports macOS 12
-# (151 needs macOS 13). Until versioned releases exist, each run replaces the
-# "test-build" pre-release.
+# (151 needs macOS 13). A version tag vYYYY.MM.DD[.N] publishes a release (the
+# in-app updater installs it); a push to main replaces the "test-build"
+# pre-release.
 on:
   workflow_dispatch:
   push:
     branches:
       - main
+    tags:
+      - 'v*'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -40,7 +43,12 @@ jobs:
 
       - name: Determine version
         id: version
-        run: echo "version=$(date -u +%Y.%m.%d)-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$(date -u +%Y.%m.%d)-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Lock CEF 150 (last macOS 12 release)
         run: cargo update --manifest-path src/Cargo.toml -p cef --precise 150.2.1
@@ -205,6 +213,12 @@ jobs:
           platform: ${{ github.workflow }}
 
       - name: Build app bundle
+        env:
+          # The in-app updater offers any release whose tag differs from this
+          # one. Empty (update check off) for test builds and for pre-release
+          # tags with a '-' suffix, which would otherwise offer the previous
+          # stable release as an "update".
+          JFN_RELEASE_TAG: ${{ github.ref_type == 'tag' && !contains(github.ref_name, '-') && github.ref_name || '' }}
         run: |
           export PKG_CONFIG_LIBDIR="$HOME/jellyfin-deps/lib/pkgconfig:$PKG_CONFIG_LIBDIR"
           export CMAKE_OSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET}"
@@ -248,7 +262,56 @@ jobs:
           fi
           ls -la "dist/${DMG_NAME}"
 
+      # Runs the exact script the app uses to update itself against the DMG
+      # just built: an "installed" copy of the app gets replaced by the one in
+      # the DMG while a stand-in process plays the app that has to quit first.
+      - name: Test the self-update
+        run: |
+          dmg=$(ls dist/*.dmg)
+          dest="$RUNNER_TEMP/Applications/Jellium Desktop.app"
+          mkdir -p "$(dirname "$dest")"
+          ditto "build/output/Jellium Desktop.app" "$dest"
+          touch "$dest/Contents/old-version-marker"
+          sleep 2 & pid=$!
+          JFN_UPDATE_TEST=1 bash src/jfn_cef/src/macos_update.sh \
+            "file://$PWD/$dmg" "$(stat -f%z "$dmg")" "$pid" "$dest" "test" \
+            || { cat "$HOME/Library/Logs/Jellium Desktop/update.log"; exit 1; }
+          cat "$HOME/Library/Logs/Jellium Desktop/update.log"
+          test ! -e "$dest/Contents/old-version-marker"
+          test -x "$dest/Contents/MacOS/jellium-desktop"
+          test ! -e "$dest.new"
+          diff -rq "build/output/Jellium Desktop.app" "$dest"
+          rm -rf "$RUNNER_TEMP/Applications"
+
+      # Release notes = only this version's CHANGELOG section. Tag
+      # vYYYY.MM.DD[.N] -> heading "## YYYY-MM-DD[.N]"; a '-' suffix (test tag)
+      # uses the section of the version it is a candidate for.
+      - name: Extract release notes
+        if: github.ref_type == 'tag'
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          ver="${ver%%-*}"
+          header=$(echo "$ver" | sed -E 's/^([0-9]+)\.([0-9]+)\.([0-9]+)/\1-\2-\3/')
+          awk -v h="## $header" '$0==h {f=1; next} /^## / && f {exit} f {print}' CHANGELOG.md > RELEASE_NOTES.md
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "::error::CHANGELOG.md has no section '## $header'"
+            exit 1
+          fi
+          cat RELEASE_NOTES.md
+
+      - name: Publish release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pre=""
+          case "$GITHUB_REF_NAME" in *-*) pre="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" dist/JelliumDesktop-*.dmg $pre \
+            --title "Jellium Desktop $GITHUB_REF_NAME (macOS 12 Intel)" \
+            --notes-file RELEASE_NOTES.md
+
       - name: Publish test pre-release
+        if: github.ref_type != 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -256,7 +319,7 @@ jobs:
           gh release create test-build dist/JelliumDesktop-*.dmg \
             --prerelease --target "$GITHUB_SHA" \
             --title "macOS 12 Intel test build (${{ steps.version.outputs.version }})" \
-            --notes "Experimental unsigned build for Intel Macs on macOS 12 Monterey (CEF 150). No RTX features on macOS. First launch: right-click the app, Open."
+            --notes "Unsigned test build of the latest main for Intel Macs on macOS 12 Monterey (CEF 150). It does not update itself; install a numbered release for that. First launch: right-click the app, Open."
 
       - name: Build machine
         if: always()

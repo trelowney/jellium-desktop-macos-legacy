@@ -331,7 +331,7 @@ fn wait_for_vo_window(mut boot: BackgroundCapture) -> Result<ReadyBoot, BootErro
 
 fn publish_device_profile(mpv_raw: *mut jfn_mpv::sys::mpv_handle) {
     let caps = unsafe { jfn_mpv::capabilities::query_raw(mpv_raw) };
-    let decoders: Vec<jfn_jellyfin::Codec> = caps
+    let mut decoders: Vec<jfn_jellyfin::Codec> = caps
         .decoders
         .into_iter()
         .map(|c| jfn_jellyfin::Codec {
@@ -343,6 +343,18 @@ fn publish_device_profile(mpv_raw: *mut jfn_mpv::sys::mpv_handle) {
             },
         })
         .collect();
+    #[cfg(target_os = "macos")]
+    if jfn_config::hw_direct_play_only() {
+        let dropped = jfn_jellyfin::retain_hw_decodable_video(
+            &mut decoders,
+            crate::hw_decode::hardware_decodable,
+        );
+        tracing::info!(
+            target: "Main",
+            "Direct play limited to hardware-decodable video; left to the server: {}",
+            if dropped.is_empty() { "none".to_string() } else { dropped.join(",") }
+        );
+    }
     let force = jfn_config::force_transcoding();
     let profile = jfn_jellyfin::build_device_profile(
         &decoders,

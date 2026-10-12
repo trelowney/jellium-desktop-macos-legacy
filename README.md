@@ -28,15 +28,19 @@ It has everything the RTX build has, except the parts that can't exist on an old
 | Hard Reload / Clear Cache and Reload in the right-click menu | ✅ |
 | Save and close in Settings | ✅ |
 | Hardware decoding defaults to `auto` (VideoToolbox on macOS) | ✅ |
+| Direct play only video this Mac decodes in hardware; the server converts the rest (Settings → Transcode) | ✅ Mac only |
 | Version shows build date and upstream base | ✅ |
-| Self-updating | planned (the RTX updater is Windows-only) |
+| Self-updating (downloads the new DMG and replaces the app) | ✅ |
+| Own icon (green, with a *Legacy* badge) | ✅ |
 | NVIDIA RTX Video Super Resolution / RTX Video HDR | ❌ needs an NVIDIA RTX GPU on Windows |
 | NVIDIA guard, GPU load (NVML) in Playback Info | ❌ NVIDIA-only |
 | Styled dropdowns, the two startup/overlay fixes | ❌ Windows-only fixes; macOS doesn't need them |
 
 ## Download
 
-Builds are published as GitHub Releases (`.dmg`). They are not signed with an Apple Developer ID, so on first launch **right-click the app → Open** and confirm.
+Download the `.dmg` from the [latest release](https://github.com/trelowney/jellium-desktop-macos-legacy/releases/latest) and drag the app into Applications. It is not signed with an Apple Developer ID, so on first launch **right-click the app → Open** and confirm. After that it updates itself.
+
+The `test-build` pre-release is the latest `main` and does not update itself.
 
 ## Building
 

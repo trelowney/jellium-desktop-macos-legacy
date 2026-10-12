@@ -7,3 +7,5 @@ pub mod shell;
 mod window_geometry;
 
 mod connection;
+#[cfg(target_os = "macos")]
+mod hw_decode;
