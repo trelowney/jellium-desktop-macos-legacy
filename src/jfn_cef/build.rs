@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-/// Upstream jellium-desktop commit this RTX fork is currently based on.
+/// Upstream jellium-desktop commit this build is currently based on.
 /// Bump this whenever the fork is re-synced onto a newer upstream version, so
 /// the in-app version keeps showing which original build it was made from.
 const UPSTREAM_BASE: &str = "14dc084";
@@ -53,14 +53,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // the wall-clock UTC build date for local/dev builds that have no tag.
     let build_date = release_date(&release_tag).unwrap_or_else(build_date);
     println!("cargo:rustc-env=JFN_BUILD_DATE={build_date}");
-    // Shown in the app (About / Playback info). Encodes: this is the RTX fork,
+    // Shown in the app (About / Playback info). Encodes: this is the macOS 12 build,
     // the build date + fork commit, and which upstream jellyfin-desktop version
     // and commit it was built from.
     // ASCII-only: this string is reported to the server in the auth header and
     // used as a User-Agent, and a non-ASCII byte there breaks the HTTP request
     // (it caused "Connection Failure"). Keep punctuation plain.
     let version_full = format!(
-        "RTX build {build_date} ({fork}) - base jellium-desktop {version}@{UPSTREAM_BASE}"
+        "macOS 12 build {build_date} ({fork}) - base jellium-desktop {version}@{UPSTREAM_BASE}"
     );
     println!("cargo:rustc-env=JFN_APP_VERSION_FULL={version_full}");
     track_git_refs(repo_root);

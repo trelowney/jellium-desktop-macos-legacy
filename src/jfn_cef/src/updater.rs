@@ -1,12 +1,12 @@
 //! User-initiated self-update. The web UI checks GitHub Releases and, when the
-//! user clicks "Update now", calls `applyUpdate(zipUrl, sizeBytes, versionTag)`.
-//! We can't overwrite the running exe/DLLs in place, so we hand off to the
-//! bundled `jellium-desktop-rtx-updater.exe` side-car, which shows a native
-//! progress window, waits for us to exit, downloads + extracts the release over
-//! the install directory, and relaunches us — then we quit.
+//! user clicks "Update now", calls `applyUpdate(url, sizeBytes, versionTag)`.
+//! We can't overwrite the running app in place, so we hand off to a helper
+//! that waits for us to exit, replaces the install and relaunches us — then we
+//! quit. On Windows that is the bundled `jellium-desktop-rtx-updater.exe`
+//! side-car (release zip); on macOS it is `macos_update.sh` (release DMG).
 
-/// Launch the updater side-car for `zip_url`, then begin app shutdown. Windows
-/// only; a no-op elsewhere (this fork only ships a Windows build).
+/// Launch the update helper for `zip_url`, then begin app shutdown. Windows and
+/// macOS; a no-op elsewhere.
 pub(crate) fn apply_update(zip_url: &str, size: u64, version: &str) {
     #[cfg(target_os = "windows")]
     {
@@ -63,15 +63,87 @@ pub(crate) fn apply_update(zip_url: &str, size: u64, version: &str) {
             }
         }
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
+    {
+        // `zip_url` is the release DMG here. The script waits for us to exit
+        // (and kills us after 30 s if we don't), so a plain shutdown is enough.
+        match spawn_macos_updater(zip_url, size, version) {
+            Ok(()) => {
+                jfn_logging::log(
+                    jfn_logging::Category::Cef,
+                    jfn_logging::Level::Info,
+                    "Update: update script started; quitting to apply",
+                );
+                jfn_playback::shutdown::jfn_shutdown_initiate();
+            }
+            Err(e) => {
+                jfn_logging::log(
+                    jfn_logging::Category::Cef,
+                    jfn_logging::Level::Warn,
+                    &format!("Update: could not start the update: {e}"),
+                );
+            }
+        }
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         let _ = (zip_url, size, version);
         jfn_logging::log(
             jfn_logging::Category::Cef,
             jfn_logging::Level::Warn,
-            "Update: self-update is only supported on the Windows build",
+            "Update: self-update is only supported on the Windows and macOS builds",
         );
     }
+}
+
+/// Download, swap and relaunch run in `macos_update.sh`, detached into its own
+/// process group so it outlives the app.
+#[cfg(target_os = "macos")]
+fn spawn_macos_updater(dmg_url: &str, size: u64, version: &str) -> std::io::Result<()> {
+    use std::io::Error;
+    use std::os::unix::process::CommandExt;
+    use std::process::{Command, Stdio};
+
+    const SCRIPT: &str = include_str!("macos_update.sh");
+
+    // .../Jellium Desktop.app/Contents/MacOS/jellium-desktop -> the .app
+    let exe = std::env::current_exe()?;
+    let app = exe
+        .ancestors()
+        .nth(3)
+        .filter(|p| p.extension().is_some_and(|e| e == "app"))
+        .ok_or_else(|| Error::other("not running from an app bundle"))?
+        .to_path_buf();
+    // Gatekeeper runs a quarantined app from a read-only random location
+    // until it has been moved (e.g. into Applications).
+    if app.to_string_lossy().contains("/AppTranslocation/") {
+        return Err(Error::other(
+            "app runs from a translocated copy; move it into Applications first",
+        ));
+    }
+    // The bundle is replaced in place, so its folder must be writable.
+    let dir = app
+        .parent()
+        .ok_or_else(|| Error::other("app has no parent folder"))?;
+    let probe = dir.join(".jellium-update-probe");
+    std::fs::write(&probe, b"")?;
+    let _ = std::fs::remove_file(&probe);
+
+    Command::new("/bin/bash")
+        .arg("-c")
+        .arg(SCRIPT)
+        .arg("jellium-update")
+        .arg(dmg_url)
+        .arg(size.to_string())
+        .arg(std::process::id().to_string())
+        .arg(&app)
+        .arg(version)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .process_group(0)
+        .spawn()
+        .map(|_| ())
 }
 
 #[cfg(target_os = "windows")]
@@ -83,7 +155,7 @@ fn spawn_updater(zip_url: &str, size: u64, version: &str) -> std::io::Result<()>
     let exe = std::env::current_exe()?;
     let dir = exe
         .parent()
-        .ok_or_else(|| Error::new(ErrorKind::Other, "exe has no parent dir"))?
+        .ok_or_else(|| Error::other("exe has no parent dir"))?
         .to_path_buf();
     let updater = dir.join("jellium-desktop-rtx-updater.exe");
     if !updater.exists() {

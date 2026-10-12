@@ -103,7 +103,8 @@
                 audioChannels: _savedSettings.audioChannels || ''
             },
             transcode: {
-                forceTranscoding: !!_savedSettings.forceTranscoding
+                forceTranscoding: !!_savedSettings.forceTranscoding,
+                hwDirectPlayOnly: _savedSettings.hwDirectPlayOnly !== false
             },
             advanced: {
                 transparentTitlebar: _savedSettings.transparentTitlebar !== false,
@@ -175,6 +176,11 @@
 
     // macOS-only: transparent titlebar toggle (shown first in Advanced section)
     if (navigator.platform.startsWith('Mac')) {
+        jmpInfo.settingsDescriptions.transcode.push({
+            key: 'hwDirectPlayOnly',
+            displayName: 'Direct Play Only Hardware-Decodable Video',
+            help: 'Ask the server to convert HEVC, VP9 and AV1 video when this Mac has no hardware decoder for it, instead of decoding it on the CPU. Smoother playback, less heat and longer battery life. Requires restart.'
+        });
         jmpInfo.settingsDescriptions.advanced.unshift({
             key: 'transparentTitlebar',
             displayName: 'Transparent Titlebar',
@@ -564,14 +570,19 @@
         }
     });
 
-    // ---- Self-update check (Windows) -------------------------------------
+    // ---- Self-update check (Windows, macOS) ------------------------------
     // Exposes window.__rtxCheckForUpdates(manual): asks GitHub for the latest
     // release and, if its tag differs from the tag THIS build was released as,
-    // shows a modal with the changelog + "Update now" (hands the zip URL to the
-    // native updater). manual=true also surfaces "up to date"/errors as a toast;
-    // the automatic startup check stays silent. All failures are swallowed.
+    // shows a modal with the changelog + "Update now" (hands the zip URL, or
+    // the DMG URL on macOS, to the native updater). manual=true also surfaces
+    // "up to date"/errors as a toast; the automatic startup check stays
+    // silent. All failures are swallowed.
     (function() {
-        const REPO = 'trelowney/jellium-desktop-rtx';
+        // The macOS 12 build is released from its own repository, as a DMG.
+        const isMac = navigator.platform.startsWith('Mac');
+        const isWin = navigator.platform.startsWith('Win');
+        const REPO = isMac ? 'trelowney/jellium-desktop-macos-legacy' : 'trelowney/jellium-desktop-rtx';
+        const ASSET = isMac ? /\.dmg$/i : /\.zip$/i;
         const esc = (s) => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
         function showToast(msg) {
@@ -630,8 +641,8 @@
         }
 
         window.__rtxCheckForUpdates = function(manual) {
-            if (!navigator.platform.startsWith('Win')) {
-                if (manual) showToast('Updates are only available on the Windows build');
+            if (!isWin && !isMac) {
+                if (manual) showToast('Updates are only available on the Windows and macOS builds');
                 return;
             }
             const current = (window.jmpInfo && jmpInfo.releaseTag) || '';
@@ -648,7 +659,7 @@
                         if (manual) showToast("You're up to date (" + current + ')');
                         return;
                     }
-                    const asset = (rel.assets || []).find(a => /\.zip$/i.test(a.name));
+                    const asset = (rel.assets || []).find(a => ASSET.test(a.name));
                     if (!asset) {
                         if (manual) showToast('Update found, but no downloadable file');
                         return;
@@ -662,7 +673,7 @@
         };
 
         // Automatic, silent check shortly after startup (once).
-        if (navigator.platform.startsWith('Win') && !window.__rtxUpdateChecked) {
+        if ((isWin || isMac) && !window.__rtxUpdateChecked) {
             window.__rtxUpdateChecked = true;
             setTimeout(() => window.__rtxCheckForUpdates(false), 4000);
         }
