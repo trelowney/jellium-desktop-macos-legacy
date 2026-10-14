@@ -1146,7 +1146,9 @@ fn run_app(
         }
     };
     if let Some(readiness) = shell_readiness {
-        match readiness.wait(platform, std::time::Duration::from_secs(5)) {
+        // Generous: a cold start on an old Mac (first launch after boot or
+        // after an update) needs far more than a warm one.
+        match readiness.wait(platform, std::time::Duration::from_secs(60)) {
             Ok(()) => tracing::debug!(target: "Main", "shell renderer ready"),
             Err(error) => {
                 // Product policy: failure of the connect/settings UI is fatal.

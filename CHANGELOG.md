@@ -5,6 +5,11 @@ are published from the matching section below. Changes that come from the
 Windows build are listed in the
 [Jellium Desktop RTX changelog](https://github.com/trelowney/jellium-desktop-rtx/blob/main/CHANGELOG.md).
 
+## 2026-10-14
+
+### Fixed
+- **The first launch after starting the Mac, or after an update, froze and then quit.** On a cold start an older Mac needs more than the 5 seconds the app gave its window and renderer to come up, so it gave up. It now waits up to a minute; the first launch can still take a little longer than the next ones.
+
 ## 2026-10-12.3
 
 ### Changed

@@ -655,10 +655,12 @@ pub fn macos_init(_mpv: *mut c_void) -> Result<(), jfn_platform_abi::PlatformIni
         // Block the main run loop until mpv creates its NSWindow. mpv's
         // window-creation work runs as a dispatch on the main queue, which
         // fires a run-loop source — `macos_pump_block` wakes on that source
-        // without polling. The deadline caps total wait at ~5s; each
-        // iteration drains pending events, blocks until *some* source
-        // fires (typically the window dispatch), then re-checks.
-        let deadline = Instant::now() + std::time::Duration::from_secs(5);
+        // without polling. The deadline caps total wait at 60 s (a cold
+        // start on an old Mac — first launch after boot or after an
+        // update — can take well over 5 s); each iteration drains pending
+        // events, blocks until *some* source fires (typically the window
+        // dispatch), then re-checks.
+        let deadline = Instant::now() + std::time::Duration::from_secs(60);
         loop {
             let ns_app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
             let windows: *mut AnyObject = msg_send![ns_app, windows];

@@ -29,8 +29,9 @@ use crate::shell::state::{self, ChromeInputs};
 use crate::shell::theme::Theme;
 
 /// How long the actor waits for a surface target before giving up: the
-/// backend creates the window on its own thread, moments after `alloc_surface`.
-const TARGET_WAIT: Duration = Duration::from_secs(5);
+/// backend creates the window on its own thread, moments after `alloc_surface`
+/// (or many seconds later on a cold start on an old Mac).
+const TARGET_WAIT: Duration = Duration::from_secs(60);
 
 pub enum Work {
     Event(Event),
