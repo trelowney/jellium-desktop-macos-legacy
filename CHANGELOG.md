@@ -5,6 +5,11 @@ are published from the matching section below. Changes that come from the
 Windows build are listed in the
 [Jellium Desktop RTX changelog](https://github.com/trelowney/jellium-desktop-rtx/blob/main/CHANGELOG.md).
 
+## Unreleased
+
+### Fixed
+- **Disconnecting AirPods or other audio devices during playback could crash the app.** The bundled mpv now registers for audio device changes only after its audio output has started, and cleans up if that start fails (upstream fix, andrewrabert/jellium-desktop#719).
+
 ## 2026-10-14
 
 ### Fixed
