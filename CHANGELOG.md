@@ -5,9 +5,13 @@ are published from the matching section below. Changes that come from the
 Windows build are listed in the
 [Jellium Desktop RTX changelog](https://github.com/trelowney/jellium-desktop-rtx/blob/main/CHANGELOG.md).
 
-## Unreleased
+## 2026-10-16
+
+### Added
+- **Remote control mode**, from the Windows build. The remote button in the top bar (next to Search) switches the app between mouse and keyboard and a remote or keyboard that sends arrows, Enter and Escape (or Backspace, the Mac's delete key). A highlight moves row by row through posters, episodes and buttons; Enter opens the highlighted item, plays an episode from a season's episode list and opens dropdowns such as Audio and Subtitles; Escape goes back to the item you came from and, during playback, stops it. The update dialog works with it too. The player's own keys are unchanged, the choice is remembered, and in mouse and keyboard mode no key behaves differently.
 
 ### Fixed
+- **Choosing an item in a dropdown with Enter no longer reopens it.**
 - **Disconnecting AirPods or other audio devices during playback could crash the app.** The bundled mpv now registers for audio device changes only after its audio output has started, and cleans up if that start fails (upstream fix, andrewrabert/jellium-desktop#719).
 
 ## 2026-10-14
