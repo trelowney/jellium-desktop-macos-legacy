@@ -32,6 +32,7 @@ It has everything the RTX build has, except the parts that can't exist on an old
 | Version shows build date and upstream base | ✅ |
 | Self-updating (downloads the new DMG and replaces the app) | ✅ |
 | Own icon (green, with a *Legacy* badge) | ✅ |
+| Remote control mode (arrows, Enter, Escape; switch in the top bar) | ✅ |
 | NVIDIA RTX Video Super Resolution / RTX Video HDR | ❌ needs an NVIDIA RTX GPU on Windows |
 | NVIDIA guard, GPU load (NVML) in Playback Info | ❌ NVIDIA-only |
 | Styled dropdowns, the two startup/overlay fixes | ❌ Windows-only fixes; macOS doesn't need them |
