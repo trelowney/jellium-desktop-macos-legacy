@@ -5,6 +5,11 @@ are published from the matching section below. Changes that come from the
 Windows build are listed in the
 [Jellium Desktop RTX changelog](https://github.com/trelowney/jellium-desktop-rtx/blob/main/CHANGELOG.md).
 
+## 2026-11-07
+
+### Fixed
+- **Dolby Vision profile 5 plays through the server.** These files have no HDR10 base layer and can show green or purple when played directly, so the server now transcodes them, with the correct colors. This picture is SDR. Other Dolby Vision files (profiles 7 and 8) follow the same rules as before.
+
 ## 2026-10-16
 
 ### Added

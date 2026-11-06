@@ -29,6 +29,7 @@ It has everything the RTX build has, except the parts that can't exist on an old
 | Save and close in Settings | ✅ |
 | Hardware decoding defaults to `auto` (VideoToolbox on macOS) | ✅ |
 | Direct play only video this Mac decodes in hardware; the server converts the rest (Settings → Transcode) | ✅ Mac only |
+| Dolby Vision profile 5 is transcoded by the server (to SDR), so it never shows green or purple | ✅ |
 | Version shows build date and upstream base | ✅ |
 | Self-updating (downloads the new DMG and replaces the app) | ✅ |
 | Own icon (green, with a *Legacy* badge) | ✅ |

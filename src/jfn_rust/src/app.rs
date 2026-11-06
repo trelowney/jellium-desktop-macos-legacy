@@ -362,6 +362,7 @@ fn publish_device_profile(mpv_raw: *mut jfn_mpv::sys::mpv_handle) {
         "Jellium Desktop",
         APP_VERSION_FULL,
         force,
+        true,
     );
     tracing::info!(target: "Main", "Device profile: {profile}");
     unsafe {
