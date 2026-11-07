@@ -94,6 +94,9 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # Third-party builds run in this job; keep the token out of .git/config.
+          persist-credentials: false
 
       - name: Install build tools
         run: |
