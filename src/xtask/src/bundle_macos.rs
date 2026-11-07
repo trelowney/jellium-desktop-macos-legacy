@@ -135,7 +135,8 @@ fn fix_lib_deps(
     }
     let text = String::from_utf8_lossy(&output.stdout);
 
-    for raw_line in text.lines() {
+    // otool's first line is the file itself, not a dependency.
+    for raw_line in text.lines().skip(1) {
         let line = raw_line.trim();
         if line.is_empty() {
             continue;
@@ -256,6 +257,16 @@ fn bundle_moltenvk(fw_dir: &Path, brew_prefix: &Path) -> Result<()> {
         println!("Bundling MoltenVK: {}", real.display());
         let dst = fw_dir.join("libMoltenVK.dylib");
         copy_writable(&real, &dst)?;
+        // install_name_tool warns when it invalidates a signature. The whole
+        // bundle gets signed at the end.
+        let status = Command::new("codesign")
+            .arg("--remove-signature")
+            .arg(&dst)
+            .status()
+            .context("spawn codesign")?;
+        if !status.success() {
+            bail!("codesign --remove-signature failed for {}", dst.display());
+        }
         install_name_tool(&[
             "-id",
             "@executable_path/../Frameworks/libMoltenVK.dylib",

@@ -11,6 +11,13 @@ env:
   MACOSX_DEPLOYMENT_TARGET: "12.0"
   PKG_CONFIG_LIBDIR: /opt/local/lib/pkgconfig:/opt/local/share/pkgconfig
   PORTS_CACHE: macports-libs-x86_64-macos12.0
+  # Pinned sources; a moved tag or a changed download fails the build.
+  MACPORTS_PKG: https://github.com/macports/macports-base/releases/download/v2.12.7/MacPorts-2.12.7-26-Tahoe.pkg
+  MACPORTS_SHA256: 588f14ccd3c6199559a070a80e6cddd6871721a08cc434775bf54378fd667910
+  FFMPEG_TAG: n8.1
+  FFMPEG_COMMIT: 9047fa1b084f76b1b4d065af2d743df1b40dfb56
+  LIBPLACEBO_TAG: v7.360.1
+  LIBPLACEBO_COMMIT: cee9b076f2c63104ccfd497fa79c39a867293ec4
 
 jobs:
   ports:
@@ -37,10 +44,8 @@ jobs:
           # A restored cache brings /opt/local but not the macports user, which only
           # the installer creates; without it port fails with "Unknown user given".
           if [ ! -x /opt/local/bin/port ] || ! id macports >/dev/null 2>&1; then
-            os=$(sw_vers -productVersion | cut -d. -f1)
-            pkg=$(curl -fsSL https://api.github.com/repos/macports/macports-base/releases/latest \
-              | jq -r --arg os "-$os-" '.assets[] | select(.name | endswith(".pkg") and contains($os)) | .browser_download_url')
-            curl -fsSL -o /tmp/macports.pkg "$pkg"
+            curl -fsSL -o /tmp/macports.pkg "$MACPORTS_PKG"
+            echo "$MACPORTS_SHA256  /tmp/macports.pkg" | shasum -a 256 -c
             sudo installer -pkg /tmp/macports.pkg -target /
             if ! grep -q '^buildfromsource always' /opt/local/etc/macports/macports.conf; then
               printf '%s\n' \
@@ -100,8 +105,11 @@ jobs:
 
       - name: Build ffmpeg from source
         run: |
-          git clone --depth 1 --branch n8.1 https://git.ffmpeg.org/ffmpeg.git /tmp/ffmpeg-src
+          git init -q /tmp/ffmpeg-src
           cd /tmp/ffmpeg-src
+          git fetch -q --depth 1 https://git.ffmpeg.org/ffmpeg.git "refs/tags/$FFMPEG_TAG"
+          test "$(git rev-parse 'FETCH_HEAD^{commit}')" = "$FFMPEG_COMMIT"
+          git checkout -q FETCH_HEAD
           ./configure \
             --prefix="$HOME/jellyfin-deps" \
             --enable-shared \
@@ -117,13 +125,19 @@ jobs:
             --disable-sdl2 \
             --extra-cflags="-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET} -I/opt/local/include" \
             --extra-ldflags="-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET} -L/opt/local/lib"
-          make -j$(sysctl -n hw.ncpu)
+          make -j"$(sysctl -n hw.ncpu)"
           make install
 
       - name: Build libplacebo from source
         run: |
-          git clone --depth 1 --recursive --branch v7.360.1 https://code.videolan.org/videolan/libplacebo.git /tmp/libplacebo-src
+          git init -q /tmp/libplacebo-src
           cd /tmp/libplacebo-src
+          git remote add origin https://code.videolan.org/videolan/libplacebo.git
+          git fetch -q --depth 1 origin "refs/tags/$LIBPLACEBO_TAG"
+          test "$(git rev-parse 'FETCH_HEAD^{commit}')" = "$LIBPLACEBO_COMMIT"
+          git checkout -q FETCH_HEAD
+          # Submodules are pinned by the commit checked above.
+          git submodule update -q --init --recursive --depth 1
           # Fix Python 3.14 compatibility: ElementTree constructor no longer
           # accepts an ElementTree object, only Element. Known upstream issue
           # in libplacebo v7.349.0 (utils_gen.py).
@@ -151,6 +165,15 @@ jobs:
           tar -C / -czf - opt/local "${HOME#/}/jellyfin-deps" | split -b 1900m - dist/macos-libs.tar.gz.
           ls -la dist
           tag="macos-libs-$(date -u +%Y.%m.%d)-${GITHUB_RUN_ID}"
+          sum=$(cat dist/macos-libs.tar.gz.* | shasum -a 256 | cut -d' ' -f1)
           gh release create "$tag" dist/* --prerelease --target "$GITHUB_SHA" \
             --title "macOS 12 libraries ($tag)" \
-            --notes "Libraries for release builds of the macOS 12 app. Not an app release."
+            --notes "Libraries for release builds of the macOS 12 app. Not an app release. SHA-256 of the joined archive: $sum"
+          {
+            echo "### Libraries published"
+            echo "Set these in build-macos-legacy.yml:"
+            echo '```'
+            echo "LIBS_TAG: $tag"
+            echo "LIBS_SHA256: $sum"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,9 +1,9 @@
 name: build-macos-legacy
 
 # Secondary macOS workflow that targets macOS 12 Monterey on Intel.
-# The standard build-macos.yml workflow uses Homebrew bottles which target
-# macOS 13+, so this workflow builds ffmpeg and libplacebo from source
-# against the macOS 12 SDK. Apple Silicon Macs all run macOS 13+, so only
+# Homebrew bottles target macOS 14+, so the libraries come prebuilt for macOS 12
+# from the build-macos-libs workflow (MacPorts + ffmpeg + libplacebo), pinned
+# below by tag and SHA-256. Apple Silicon Macs all run macOS 13+, so only
 # x86_64 is built here.
 
 # Pinned to CEF 150, the last Chromium release that still supports macOS 12
@@ -28,6 +28,9 @@ env:
   PKG_CONFIG_LIBDIR: /opt/local/lib/pkgconfig:/opt/local/share/pkgconfig
   # The app bundler copies dependencies from here instead of `brew --prefix`.
   JFN_DEPS_PREFIX: /opt/local
+  # Output of the build-macos-libs workflow; update both after running it.
+  LIBS_TAG: macos-libs-2026.11.07-42320157830
+  LIBS_SHA256: b836f2e3147ffbf8d3a428e758d5ee6d8c19120d7347974024c19e1ce2f32053
 
 jobs:
   build:
@@ -36,6 +39,10 @@ jobs:
       contents: write
 
     steps:
+      # checkout runs git init, which warns without a default branch name.
+      - name: Configure git
+        run: git config --global init.defaultBranch main
+
       - name: Checkout
         uses: actions/checkout@v7
         with:
@@ -54,138 +61,25 @@ jobs:
         run: cargo update --manifest-path src/Cargo.toml -p cef --precise 150.2.1
 
       - name: Install build tools
-        run: brew install meson ninja nasm
-
-      # Homebrew bottles on this runner are built for macOS 14/26 and refuse to
-      # load on Monterey, so every library that ends up in the app bundle comes
-      # from MacPorts, compiled from source with a macOS 12 deployment target.
-      - name: Make /opt/local writable for the cache restore
-        run: sudo mkdir -p /opt/local && sudo chown "$(whoami)" /opt/local
-
-      # The first MacPorts build takes hours and may not finish inside the 6 h
-      # job limit, so it is resumable: a cut-off build is cached as it is, and
-      # the next run restores it and installs only the ports still missing.
-      - name: Restore MacPorts libraries
-        uses: actions/cache/restore@v6
-        with:
-          path: /opt/local
-          key: macports-x86_64-macos${{ env.MACOSX_DEPLOYMENT_TARGET }}-v2
-          restore-keys: macports-x86_64-macos${{ env.MACOSX_DEPLOYMENT_TARGET }}-v2-
-
-      - name: Check MacPorts libraries
-        id: ports-check
-        run: test -f /opt/local/.ports-complete && echo "complete=true" >> "$GITHUB_OUTPUT" || true
-
-      - name: Build libraries with MacPorts
-        id: ports
-        if: steps.ports-check.outputs.complete != 'true'
-        timeout-minutes: 240
         run: |
-          export PATH="/opt/local/bin:/opt/local/sbin:$PATH"
-          # A restored cache brings /opt/local but not the macports user, which only
-          # the installer creates; without it port fails with "Unknown user given".
-          if [ ! -x /opt/local/bin/port ] || ! id macports >/dev/null 2>&1; then
-            os=$(sw_vers -productVersion | cut -d. -f1)
-            pkg=$(curl -fsSL https://api.github.com/repos/macports/macports-base/releases/latest \
-              | jq -r --arg os "-$os-" '.assets[] | select(.name | endswith(".pkg") and contains($os)) | .browser_download_url')
-            curl -fsSL -o /tmp/macports.pkg "$pkg"
-            sudo installer -pkg /tmp/macports.pkg -target /
-            if ! grep -q '^buildfromsource always' /opt/local/etc/macports/macports.conf; then
-              printf '%s\n' \
-                "macosx_deployment_target ${MACOSX_DEPLOYMENT_TARGET}" \
-                'buildfromsource always' \
-                'build_arch x86_64' | sudo tee -a /opt/local/etc/macports/macports.conf
-              # -yjit: shaderc's docs need asciidoctor -> ruby, and ruby's YJIT would
-              # pull in a from-source Rust compiler (2+ hours). Nothing of it ships.
-              echo '-x11 +quartz -yjit' | sudo tee -a /opt/local/etc/macports/variants.conf
-            fi
-          fi
-          sudo port -N selfupdate
-          sudo port -N install \
-            libass lcms2 luajit zimg libjpeg-turbo \
-            vulkan-loader vulkan-headers MoltenVK shaderc
-          sudo touch /opt/local/.ports-complete
+          # Some are already on the runner, and brew warns about those.
+          for tool in meson ninja; do
+            command -v "$tool" >/dev/null || brew install "$tool"
+          done
 
-      - name: Save MacPorts libraries
-        if: always() && (steps.ports.outcome == 'success' || steps.ports.outcome == 'failure' || steps.ports.outcome == 'cancelled')
+      # /opt/local (MacPorts) and ~/jellyfin-deps (ffmpeg, libplacebo), built for
+      # macOS 12 by the build-macos-libs workflow.
+      - name: Install prebuilt libraries
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          # sudo resets PATH, so call port by its full path.
-          sudo /opt/local/bin/port -N clean --all installed || true
-          sudo rm -rf /opt/local/var/macports/build
-          sudo chown -R "$(whoami)" /opt/local
-          # Some ports install files the owner can't read (dbus-daemon-launch-helper
-          # is 4750 root:messagebus); tar would fail on them and nothing would be saved.
-          chmod -R u+rwX /opt/local
-          unreadable=$(find /opt/local ! -perm -u=r | head -5)
-          if [ -n "$unreadable" ]; then
-            echo "::error::Files the cache can't read: $unreadable"
-            exit 1
-          fi
-
-      - name: Upload MacPorts cache
-        if: always() && (steps.ports.outcome == 'success' || steps.ports.outcome == 'failure' || steps.ports.outcome == 'cancelled')
-        uses: actions/cache/save@v6
-        with:
-          path: /opt/local
-          key: macports-x86_64-macos${{ env.MACOSX_DEPLOYMENT_TARGET }}-v2-${{ github.run_id }}-${{ github.run_attempt }}
-
-      - name: Stop if MacPorts is not finished yet
-        if: steps.ports.outcome != 'success' && steps.ports.outcome != 'skipped'
-        run: |
-          echo "::error::MacPorts did not finish within the time limit. The progress is cached; run the workflow again to continue."
-          exit 1
-
-      - name: Cache built deps (ffmpeg + libplacebo)
-        id: deps-cache
-        uses: actions/cache@v6
-        with:
-          path: ~/jellyfin-deps
-          key: deps-x86_64-ffmpeg-n8.1-libplacebo-v7.360.1-macos${{ env.MACOSX_DEPLOYMENT_TARGET }}-macports-v3
-
-      - name: Build ffmpeg from source
-        if: steps.deps-cache.outputs.cache-hit != 'true'
-        run: |
-          git clone --depth 1 --branch n8.1 https://git.ffmpeg.org/ffmpeg.git /tmp/ffmpeg-src
-          cd /tmp/ffmpeg-src
-          ./configure \
-            --prefix="$HOME/jellyfin-deps" \
-            --enable-shared \
-            --disable-static \
-            --enable-gpl \
-            --enable-version3 \
-            --disable-programs \
-            --disable-doc \
-            --disable-debug \
-            --disable-xlib \
-            --disable-libxcb \
-            --disable-lzma \
-            --disable-sdl2 \
-            --extra-cflags="-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET} -I/opt/local/include" \
-            --extra-ldflags="-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET} -L/opt/local/lib"
-          make -j$(sysctl -n hw.ncpu)
-          make install
-
-      - name: Build libplacebo from source
-        if: steps.deps-cache.outputs.cache-hit != 'true'
-        run: |
-          git clone --depth 1 --recursive --branch v7.360.1 https://code.videolan.org/videolan/libplacebo.git /tmp/libplacebo-src
-          cd /tmp/libplacebo-src
-          # Fix Python 3.14 compatibility: ElementTree constructor no longer
-          # accepts an ElementTree object, only Element. Known upstream issue
-          # in libplacebo v7.349.0 (utils_gen.py).
-          python3 -c "
-          import pathlib
-          p = pathlib.Path('src/vulkan/utils_gen.py')
-          t = p.read_text()
-          t = t.replace('VkXML(ET.parse(xmlfile))', 'VkXML(ET.parse(xmlfile).getroot())')
-          p.write_text(t)
-          "
-          meson setup build --prefix="$HOME/jellyfin-deps" \
-            -Ddemos=false -Dtests=false -Dvulkan=enabled \
-            -Dc_args="-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET}" \
-            -Dcpp_args="-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET}"
-          ninja -C build
-          ninja -C build install
+          test "$HOME" = /Users/runner
+          gh release download "$LIBS_TAG" -p 'macos-libs.tar.gz.*' -D "$RUNNER_TEMP/libs"
+          cat "$RUNNER_TEMP"/libs/macos-libs.tar.gz.* > "$RUNNER_TEMP/libs.tar.gz"
+          echo "$LIBS_SHA256  $RUNNER_TEMP/libs.tar.gz" | shasum -a 256 -c
+          sudo mkdir -p /opt/local && sudo chown "$(whoami)" /opt/local
+          tar -C / -xzf "$RUNNER_TEMP/libs.tar.gz"
+          rm -rf "$RUNNER_TEMP/libs" "$RUNNER_TEMP/libs.tar.gz"
 
       - name: Patch mpv for macOS 12 Swift compatibility
         run: |
@@ -211,6 +105,9 @@ jobs:
               t = t.replace(marker, inject)
               p.write_text(t)
           "
+
+      - name: Patch mpv to build without warnings
+        run: python3 dev/macos/patch_mpv_warnings.py
 
       - uses: ./.github/actions/setup-cef
         with:
@@ -245,7 +142,7 @@ jobs:
 
       - name: Create DMG
         run: |
-          brew install create-dmg
+          command -v create-dmg >/dev/null || brew install create-dmg
           APP_NAME="Jellium Desktop"
           VERSION="${{ steps.version.outputs.version }}"
           DMG_NAME="JelliumDesktop-${VERSION}-macos-12-x86_64.dmg"
@@ -349,12 +246,11 @@ jobs:
             echo "| macOS | $(sw_vers -productVersion) ($(uname -m)) |"
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
-  # Delete the CEF cache after each run; keep the MacPorts and ffmpeg/libplacebo
-  # caches, they are what makes later builds fast.
+  # Delete the CEF cache after each run; the libraries come from a release.
   cleanup-cache:
     needs: build
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       actions: write
     steps:

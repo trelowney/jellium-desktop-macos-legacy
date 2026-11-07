@@ -37,6 +37,8 @@ pub fn build(out: &Path, cplayer: bool) -> Result<Mpv> {
             .arg(&src)
             .arg("--default-library=shared")
             .arg("-Dlibmpv=true")
+            // The OpenGL backend: unused, the app renders through Vulkan.
+            .arg("-Dmacos-cocoa-cb=disabled")
             .arg(format!("-Dcplayer={cplayer_flag}"))
             .status()
             .context("spawn meson setup")?;
