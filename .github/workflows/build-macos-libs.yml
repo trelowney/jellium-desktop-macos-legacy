@@ -52,16 +52,29 @@ jobs:
               printf '%s\n' \
                 "macosx_deployment_target ${MACOSX_DEPLOYMENT_TARGET}" \
                 'buildfromsource always' \
-                'build_arch x86_64' | sudo tee -a /opt/local/etc/macports/macports.conf
+                'build_arch x86_64' \
+                'applications_dir /opt/local/Applications' | sudo tee -a /opt/local/etc/macports/macports.conf
               # -yjit: shaderc's docs need asciidoctor -> ruby, and ruby's YJIT would
               # pull in a from-source Rust compiler (2+ hours). Nothing of it ships.
               echo '-x11 +quartz -yjit' | sudo tee -a /opt/local/etc/macports/variants.conf
             fi
           fi
+          ports="libass lcms2 luajit zimg libjpeg-turbo openssl3 vulkan-loader vulkan-headers MoltenVK shaderc"
+          missing=""
+          for p in $ports; do
+            port -q installed "$p" | grep -q '(active)' || missing="$missing $p"
+          done
+          # Nothing to do when the cache already has them all. port install would
+          # still scan every binary, including the app bundles of the first build
+          # in /Applications/MacPorts, which the cache doesn't hold.
+          if [ -z "$missing" ]; then
+            echo "All ports are installed."
+            exit 0
+          fi
+          echo "Installing:$missing"
           sudo port -N selfupdate
-          sudo port -N install \
-            libass lcms2 luajit zimg libjpeg-turbo openssl3 \
-            vulkan-loader vulkan-headers MoltenVK shaderc
+          # shellcheck disable=SC2086
+          sudo port -N install $ports
 
       - name: Prepare MacPorts libraries for the cache
         if: always() && steps.ports.outcome != 'skipped'
@@ -143,6 +156,7 @@ jobs:
             --disable-securetransport \
             --enable-openssl \
             --disable-encoder='adpcm_*' \
+            --enable-encoder=adpcm_g726,adpcm_g726le \
             --extra-cflags="-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET} -I/opt/local/include" \
             --extra-ldflags="-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET} -L/opt/local/lib"
           # nasm stamps the minimum macOS version through a pre-included pragma.

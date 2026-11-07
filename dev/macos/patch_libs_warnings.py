@@ -14,6 +14,17 @@ PATCHES = {
         "configure": [
             (" -Wl,-single_module -Wl,-install_name,", " -Wl,-install_name,"),
         ],
+        # Backport of 46d899d7a0 from release/8.1: ret was returned uninitialized.
+        "libavformat/mov.c": [
+            (
+                "    ff_mov_read_chnl(c->fc, pb, st);\n",
+                "    ret = ff_mov_read_chnl(c->fc, pb, st);\n"
+                "    if (ret < 0) {\n"
+                "        avio_seek(pb, end, SEEK_SET);\n"
+                "        return 0;\n"
+                "    }\n",
+            ),
+        ],
         # Dummy writer of size 0 (nothing is written); the cast states that.
         "libavcodec/bsf/extract_extradata.c": [
             (
@@ -28,7 +39,7 @@ PATCHES = {
         "src/meson.build": [
             (
                 "  name_prefix: 'lib'\n",
-                "  name_prefix: host_machine.system() == 'windows' ? 'lib' : [],\n",
+                "  kwargs: host_machine.system() == 'windows' ? {'name_prefix': 'lib'} : {},\n",
             ),
         ],
     },
