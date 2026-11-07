@@ -1328,6 +1328,8 @@ fn run_with_cef(
         plat().set_theme_color(0x101010);
     }
     publish_device_profile(mpv_raw);
+    #[cfg(target_os = "macos")]
+    crate::tls_roots::install();
     if let Some(runtime) = deferred {
         let platform = &resources.native.get().platform;
         match initialize_cef(runtime, platform, opts) {

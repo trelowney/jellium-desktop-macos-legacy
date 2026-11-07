@@ -9,3 +9,5 @@ mod window_geometry;
 mod connection;
 #[cfg(target_os = "macos")]
 mod hw_decode;
+#[cfg(target_os = "macos")]
+mod tls_roots;

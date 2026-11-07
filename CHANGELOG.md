@@ -5,6 +5,11 @@ are published from the matching section below. Changes that come from the
 Windows build are listed in the
 [Jellium Desktop RTX changelog](https://github.com/trelowney/jellium-desktop-rtx/blob/main/CHANGELOG.md).
 
+## 2026-11-07.1
+
+### Fixed
+- **Nothing played in 2026-11-07 over HTTPS.** The player's OpenSSL found no certificate authorities on the Mac, so every HTTPS stream failed with "certificate verify failed" and the title logo flashed a few times before playback gave up. The player now trusts the same certificate authorities as macOS, including any you added in Keychain Access. To use your own file instead, set `tls-ca-file` in `~/.config/jellium-desktop-rtx/mpv/mpv.conf`.
+
 ## 2026-11-07
 
 ### Fixed

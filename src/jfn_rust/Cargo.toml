@@ -52,6 +52,8 @@ thiserror.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 jfn-macos = { path = "../macos" }
+base64 = "0.23"
+rustls-native-certs = "0.8"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 jfn-windows = { path = "../windows" }
