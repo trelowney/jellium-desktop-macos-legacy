@@ -46,7 +46,9 @@ The `test-build` pre-release is the latest `main` and does not update itself.
 
 ## Building
 
-GitHub Actions builds everything on an Intel macOS runner: `.github/workflows/build-macos-legacy.yml`. Libraries come from MacPorts with `macosx_deployment_target 12.0` (Homebrew bottles target macOS 14+ and won't load on Monterey); ffmpeg and libplacebo are built from source against them. The first build takes a few hours, later builds reuse the cache.
+GitHub Actions builds everything on an Intel macOS runner: `.github/workflows/build-macos-legacy.yml`. The libraries come prebuilt from `.github/workflows/build-macos-libs.yml`, which takes them from MacPorts with `macosx_deployment_target 12.0` (Homebrew bottles target macOS 14+ and won't load on Monterey) and builds ffmpeg and libplacebo from source against them. The release workflow pins that build by tag and checksum.
+
+Before anything is published, a smoke test (`dev/macos/smoke_test.sh`) starts the app against a stand-in Jellyfin server and plays a short clip over HTTPS, with the build machine's libraries moved away. `.github/workflows/smoke-macos.yml` runs the same test against any published release in a few minutes. It can't catch problems specific to one Mac's graphics or a slow cold start, which still need a real Mac.
 
 ## Credits / license
 

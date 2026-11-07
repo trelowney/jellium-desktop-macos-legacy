@@ -156,6 +156,12 @@ jobs:
           done < <(find "build/output/Jellium Desktop.app" -type f -print0)
           exit $bad
 
+      # Start the app and play a clip over HTTPS before anything is published.
+      - name: Smoke test
+        run: >-
+          dev/macos/smoke_test.sh "build/output/Jellium Desktop.app"
+          "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$GITHUB_SHA/dev/macos/smoke.mp4"
+
       - name: Create DMG
         run: |
           command -v create-dmg >/dev/null || brew install create-dmg
