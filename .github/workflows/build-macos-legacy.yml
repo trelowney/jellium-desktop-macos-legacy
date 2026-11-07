@@ -81,6 +81,22 @@ jobs:
           tar -C / -xzf "$RUNNER_TEMP/libs.tar.gz"
           rm -rf "$RUNNER_TEMP/libs" "$RUNNER_TEMP/libs.tar.gz"
 
+      # MoltenVK 1.4.2 (MacPorts since 2026-10-18) makes video flash in random
+      # colors on Mac1-family GPUs such as the Intel Iris 6000. Use 1.4.1, the
+      # same official KhronosGroup binary MacPorts shipped before, pinned by the
+      # checksum from MacPorts' Portfile.
+      - name: Use MoltenVK 1.4.1
+        env:
+          MVK_URL: https://github.com/KhronosGroup/MoltenVK/releases/download/v1.4.1/MoltenVK-macos.tar
+          MVK_SHA256: 5ea0c259df7ded9a275444820f09cced54d6e5a7c7a31d262de62a5cdb7e15cf
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/mvk.tar" "$MVK_URL"
+          echo "$MVK_SHA256  $RUNNER_TEMP/mvk.tar" | shasum -a 256 -c
+          mkdir "$RUNNER_TEMP/mvk"
+          tar -C "$RUNNER_TEMP/mvk" -xf "$RUNNER_TEMP/mvk.tar" MoltenVK/MoltenVK/dynamic/dylib/macOS/libMoltenVK.dylib
+          lipo -thin x86_64 "$RUNNER_TEMP/mvk/MoltenVK/MoltenVK/dynamic/dylib/macOS/libMoltenVK.dylib" -output /opt/local/lib/libMoltenVK.dylib
+          rm -rf "$RUNNER_TEMP/mvk" "$RUNNER_TEMP/mvk.tar"
+
       - name: Patch mpv for macOS 12 Swift compatibility
         run: |
           python3 -c "

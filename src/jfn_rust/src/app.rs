@@ -117,18 +117,43 @@ fn init_logging(log_file: Option<&Path>, log_level: &str, version: &CefVersion) 
 }
 
 fn log_mpv_versions() {
-    for prop in ["mpv-version", "ffmpeg-version"] {
-        let pc = cs(prop);
-        let v = unsafe { jfn_mpv::api::jfn_mpv_get_property_string(pc.as_ptr()) };
-        let s = if v.is_null() {
-            String::new()
-        } else {
-            let s = unsafe { CStr::from_ptr(v) }.to_string_lossy().into_owned();
-            unsafe { jfn_mpv::api::jfn_mpv_free_string(v) };
-            s
-        };
-        tracing::info!(target: "Main", "{prop} {s}");
+    off_main(|| {
+        for prop in ["mpv-version", "ffmpeg-version"] {
+            let pc = cs(prop);
+            let v = unsafe { jfn_mpv::api::jfn_mpv_get_property_string(pc.as_ptr()) };
+            let s = if v.is_null() {
+                String::new()
+            } else {
+                let s = unsafe { CStr::from_ptr(v) }.to_string_lossy().into_owned();
+                unsafe { jfn_mpv::api::jfn_mpv_free_string(v) };
+                s
+            };
+            tracing::info!(target: "Main", "{prop} {s}");
+        }
+    });
+}
+
+/// Runs synchronous mpv calls on a side thread while the main thread keeps
+/// servicing its run loop, and returns their result. On macOS mpv's VO does
+/// `DispatchQueue.main.sync` while it starts; on a cold start it is still
+/// starting when the app first reads mpv properties, so a main thread parked
+/// in `mpv_get_property` deadlocked with it and the first launch after a boot
+/// or an update froze. Elsewhere `run_blocking` runs `f` inline. `None` only
+/// if `f` panicked.
+fn off_main<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Option<T> {
+    let slot = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let out = slot.clone();
+    let work: Box<dyn FnOnce() + Send> = Box::new(move || {
+        let value = f();
+        if let Ok(mut guard) = out.lock() {
+            *guard = Some(value);
+        }
+    });
+    if let Err(error) = plat().run_blocking(work) {
+        tracing::warn!(target: "Main", "{error}; running on the main thread");
+        error.into_work()();
     }
+    slot.lock().ok().and_then(|mut guard| guard.take())
 }
 
 /// Restores the builtin CLOSE_WIN -> quit binding that
@@ -330,6 +355,23 @@ fn wait_for_vo_window(mut boot: BackgroundCapture) -> Result<ReadyBoot, BootErro
 }
 
 fn publish_device_profile(mpv_raw: *mut jfn_mpv::sys::mpv_handle) {
+    // The pointer crosses to off_main's thread as an address; the handle
+    // outlives this call.
+    let mpv_addr = mpv_raw as usize;
+    let Some(profile) =
+        off_main(move || device_profile(mpv_addr as *mut jfn_mpv::sys::mpv_handle))
+    else {
+        return;
+    };
+    unsafe {
+        jfn_cef::injection::jfn_cef_set_device_profile_json(
+            profile.as_ptr() as *const _,
+            profile.len(),
+        );
+    }
+}
+
+fn device_profile(mpv_raw: *mut jfn_mpv::sys::mpv_handle) -> String {
     let caps = unsafe { jfn_mpv::capabilities::query_raw(mpv_raw) };
     let mut decoders: Vec<jfn_jellyfin::Codec> = caps
         .decoders
@@ -365,12 +407,7 @@ fn publish_device_profile(mpv_raw: *mut jfn_mpv::sys::mpv_handle) {
         true,
     );
     tracing::info!(target: "Main", "Device profile: {profile}");
-    unsafe {
-        jfn_cef::injection::jfn_cef_set_device_profile_json(
-            profile.as_ptr() as *const _,
-            profile.len(),
-        );
-    }
+    profile
 }
 
 /// Consumes the browser bootstrap and returns its initialized session.

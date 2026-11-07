@@ -16,18 +16,20 @@ use base64::Engine;
 const SYSTEM_BUNDLE: &str = "/etc/ssl/cert.pem";
 const OPTION: &str = "tls-ca-file";
 
+/// Everything runs on a side thread: reading an mpv property can block while
+/// mpv's VO still waits for the main thread at startup.
 pub(crate) fn install() {
-    // A tls-ca-file set in the user's mpv.conf wins.
-    if !current().is_empty() {
-        tracing::info!(target: "Main", "TLS roots: keeping {OPTION} from mpv.conf");
-        return;
-    }
-    if Path::new(SYSTEM_BUNDLE).is_file() {
-        set(SYSTEM_BUNDLE);
-    }
     let spawned = std::thread::Builder::new()
         .name("tls-roots".into())
         .spawn(|| {
+            // A tls-ca-file set in the user's mpv.conf wins.
+            if !current().is_empty() {
+                tracing::info!(target: "Main", "TLS roots: keeping {OPTION} from mpv.conf");
+                return;
+            }
+            if Path::new(SYSTEM_BUNDLE).is_file() {
+                set(SYSTEM_BUNDLE);
+            }
             let started = std::time::Instant::now();
             let result = rustls_native_certs::load_native_certs();
             for error in &result.errors {

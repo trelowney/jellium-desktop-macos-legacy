@@ -5,6 +5,12 @@ are published from the matching section below. Changes that come from the
 Windows build are listed in the
 [Jellium Desktop RTX changelog](https://github.com/trelowney/jellium-desktop-rtx/blob/main/CHANGELOG.md).
 
+## 2026-11-07.3
+
+### Fixed
+- **Video flashed in random colors.** The bundled MoltenVK, which draws the video through Metal, had been updated to 1.4.2, which breaks drawing on older Intel graphics such as the Iris 6000. The app uses 1.4.1 again, as in 2026-10-16.
+- **The first launch after starting the Mac, or after an update, still froze and then quit.** At startup the app read a few values from the player on the main thread while the player, still setting up its window, waited for that same thread. A slow cold start made the two wait for each other. These reads now run in the background while the main thread keeps working.
+
 ## 2026-11-07.2
 
 ### Fixed
