@@ -82,19 +82,23 @@ jobs:
         timeout-minutes: 240
         run: |
           export PATH="/opt/local/bin:/opt/local/sbin:$PATH"
-          if [ ! -x /opt/local/bin/port ]; then
+          # A restored cache brings /opt/local but not the macports user, which only
+          # the installer creates; without it port fails with "Unknown user given".
+          if [ ! -x /opt/local/bin/port ] || ! id macports >/dev/null 2>&1; then
             os=$(sw_vers -productVersion | cut -d. -f1)
             pkg=$(curl -fsSL https://api.github.com/repos/macports/macports-base/releases/latest \
               | jq -r --arg os "-$os-" '.assets[] | select(.name | endswith(".pkg") and contains($os)) | .browser_download_url')
             curl -fsSL -o /tmp/macports.pkg "$pkg"
             sudo installer -pkg /tmp/macports.pkg -target /
-            printf '%s\n' \
-              "macosx_deployment_target ${MACOSX_DEPLOYMENT_TARGET}" \
-              'buildfromsource always' \
-              'build_arch x86_64' | sudo tee -a /opt/local/etc/macports/macports.conf
-            # -yjit: shaderc's docs need asciidoctor -> ruby, and ruby's YJIT would
-            # pull in a from-source Rust compiler (2+ hours). Nothing of it ships.
-            echo '-x11 +quartz -yjit' | sudo tee -a /opt/local/etc/macports/variants.conf
+            if ! grep -q '^buildfromsource always' /opt/local/etc/macports/macports.conf; then
+              printf '%s\n' \
+                "macosx_deployment_target ${MACOSX_DEPLOYMENT_TARGET}" \
+                'buildfromsource always' \
+                'build_arch x86_64' | sudo tee -a /opt/local/etc/macports/macports.conf
+              # -yjit: shaderc's docs need asciidoctor -> ruby, and ruby's YJIT would
+              # pull in a from-source Rust compiler (2+ hours). Nothing of it ships.
+              echo '-x11 +quartz -yjit' | sudo tee -a /opt/local/etc/macports/variants.conf
+            fi
           fi
           sudo port -N selfupdate
           sudo port -N install \
