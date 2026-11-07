@@ -33,7 +33,7 @@ python3 "$here/smoke_server.py" "$media_url" 8096 &
 server_pid=$!
 
 "$exe" --config-dir "$work/config" --cache-dir "$work/cache" \
-  --log-file "$log" --log-level info >/dev/null 2>&1 &
+  --log-file "$log" --log-level info >"$work/output.log" 2>&1 &
 app_pid=$!
 
 result="no playback within 120 s"
@@ -50,6 +50,13 @@ fi
 if [ -n "$result" ]; then
   echo "::error::Smoke test failed: $result"
   grep -v 'Device profile:' "$log" | tail -80 || true
+  echo "--- app output"
+  tail -40 "$work/output.log" || true
+  report=$(ls -t ~/Library/Logs/DiagnosticReports/*.ips 2>/dev/null | head -1)
+  if [ -n "$report" ]; then
+    echo "--- crash report $report"
+    python3 "$here/crash_summary.py" "$report" || true
+  fi
   exit 1
 fi
 echo "Smoke test passed: the app started and played $media_url"
