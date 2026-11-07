@@ -1,0 +1,156 @@
+name: build-macos-libs
+
+# Builds the libraries the macOS 12 app needs and publishes them as a pre-release,
+# so release builds download them instead of compiling third-party code. Run it
+# by hand when a library version changes. Its log carries third-party warnings
+# that release builds no longer have.
+on:
+  workflow_dispatch:
+
+env:
+  MACOSX_DEPLOYMENT_TARGET: "12.0"
+  PKG_CONFIG_LIBDIR: /opt/local/lib/pkgconfig:/opt/local/share/pkgconfig
+  PORTS_CACHE: macports-libs-x86_64-macos12.0
+
+jobs:
+  ports:
+    runs-on: macos-26-intel
+    timeout-minutes: 355
+    steps:
+      - name: Make /opt/local writable for the cache restore
+        run: sudo mkdir -p /opt/local && sudo chown "$(whoami)" /opt/local
+
+      # If the build doesn't finish in time, it's cached as it is and the next
+      # run installs only the ports still missing.
+      - name: Restore MacPorts libraries
+        uses: actions/cache/restore@v6
+        with:
+          path: /opt/local
+          key: ${{ env.PORTS_CACHE }}-${{ github.run_id }}
+          restore-keys: ${{ env.PORTS_CACHE }}-
+
+      - name: Build libraries with MacPorts
+        id: ports
+        timeout-minutes: 330
+        run: |
+          export PATH="/opt/local/bin:/opt/local/sbin:$PATH"
+          # A restored cache brings /opt/local but not the macports user, which only
+          # the installer creates; without it port fails with "Unknown user given".
+          if [ ! -x /opt/local/bin/port ] || ! id macports >/dev/null 2>&1; then
+            os=$(sw_vers -productVersion | cut -d. -f1)
+            pkg=$(curl -fsSL https://api.github.com/repos/macports/macports-base/releases/latest \
+              | jq -r --arg os "-$os-" '.assets[] | select(.name | endswith(".pkg") and contains($os)) | .browser_download_url')
+            curl -fsSL -o /tmp/macports.pkg "$pkg"
+            sudo installer -pkg /tmp/macports.pkg -target /
+            if ! grep -q '^buildfromsource always' /opt/local/etc/macports/macports.conf; then
+              printf '%s\n' \
+                "macosx_deployment_target ${MACOSX_DEPLOYMENT_TARGET}" \
+                'buildfromsource always' \
+                'build_arch x86_64' | sudo tee -a /opt/local/etc/macports/macports.conf
+              # -yjit: shaderc's docs need asciidoctor -> ruby, and ruby's YJIT would
+              # pull in a from-source Rust compiler (2+ hours). Nothing of it ships.
+              echo '-x11 +quartz -yjit' | sudo tee -a /opt/local/etc/macports/variants.conf
+            fi
+          fi
+          sudo port -N selfupdate
+          sudo port -N install \
+            libass lcms2 luajit zimg libjpeg-turbo \
+            vulkan-loader vulkan-headers MoltenVK shaderc
+
+      - name: Prepare MacPorts libraries for the cache
+        if: always() && steps.ports.outcome != 'skipped'
+        run: |
+          # sudo resets PATH, so call port by its full path.
+          sudo /opt/local/bin/port -N clean --all installed || true
+          sudo rm -rf /opt/local/var/macports/build
+          sudo chown -R "$(whoami)" /opt/local
+          # Some ports install files the owner can't read (dbus-daemon-launch-helper
+          # is 4750 root:messagebus); tar would fail on them and nothing would be saved.
+          chmod -R u+rwX /opt/local
+
+      - name: Upload MacPorts cache
+        if: always() && steps.ports.outcome != 'skipped'
+        uses: actions/cache/save@v6
+        with:
+          path: /opt/local
+          key: ${{ env.PORTS_CACHE }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+  publish:
+    needs: ports
+    runs-on: macos-26-intel
+    timeout-minutes: 355
+    permissions:
+      contents: write
+    steps:
+      - name: Install build tools
+        run: |
+          for tool in meson ninja nasm; do
+            command -v "$tool" >/dev/null || brew install "$tool"
+          done
+
+      - name: Make /opt/local writable for the cache restore
+        run: sudo mkdir -p /opt/local && sudo chown "$(whoami)" /opt/local
+
+      - name: Restore MacPorts libraries
+        uses: actions/cache/restore@v6
+        with:
+          path: /opt/local
+          key: ${{ env.PORTS_CACHE }}-${{ github.run_id }}-${{ github.run_attempt }}
+          fail-on-cache-miss: true
+
+      - name: Build ffmpeg from source
+        run: |
+          git clone --depth 1 --branch n8.1 https://git.ffmpeg.org/ffmpeg.git /tmp/ffmpeg-src
+          cd /tmp/ffmpeg-src
+          ./configure \
+            --prefix="$HOME/jellyfin-deps" \
+            --enable-shared \
+            --disable-static \
+            --enable-gpl \
+            --enable-version3 \
+            --disable-programs \
+            --disable-doc \
+            --disable-debug \
+            --disable-xlib \
+            --disable-libxcb \
+            --disable-lzma \
+            --disable-sdl2 \
+            --extra-cflags="-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET} -I/opt/local/include" \
+            --extra-ldflags="-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET} -L/opt/local/lib"
+          make -j$(sysctl -n hw.ncpu)
+          make install
+
+      - name: Build libplacebo from source
+        run: |
+          git clone --depth 1 --recursive --branch v7.360.1 https://code.videolan.org/videolan/libplacebo.git /tmp/libplacebo-src
+          cd /tmp/libplacebo-src
+          # Fix Python 3.14 compatibility: ElementTree constructor no longer
+          # accepts an ElementTree object, only Element. Known upstream issue
+          # in libplacebo v7.349.0 (utils_gen.py).
+          python3 -c "
+          import pathlib
+          p = pathlib.Path('src/vulkan/utils_gen.py')
+          t = p.read_text()
+          t = t.replace('VkXML(ET.parse(xmlfile))', 'VkXML(ET.parse(xmlfile).getroot())')
+          p.write_text(t)
+          "
+          meson setup build --prefix="$HOME/jellyfin-deps" \
+            -Ddemos=false -Dtests=false -Dvulkan=enabled \
+            -Dc_args="-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET}" \
+            -Dcpp_args="-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET}"
+          ninja -C build
+          ninja -C build install
+
+      - name: Publish the libraries
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          mkdir dist
+          # Releases take files up to 2 GB, so the archive is split.
+          tar -C / -czf - opt/local "${HOME#/}/jellyfin-deps" | split -b 1900m - dist/macos-libs.tar.gz.
+          ls -la dist
+          tag="macos-libs-$(date -u +%Y.%m.%d)-${GITHUB_RUN_ID}"
+          gh release create "$tag" dist/* --prerelease --target "$GITHUB_SHA" \
+            --title "macOS 12 libraries ($tag)" \
+            --notes "Libraries for release builds of the macOS 12 app. Not an app release."
