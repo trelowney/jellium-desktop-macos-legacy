@@ -32,6 +32,10 @@ trap cleanup EXIT
 python3 "$here/smoke_server.py" "$media_url" 8096 &
 server_pid=$!
 
+# The runner's virtual GPU aborts when MoltenVK probes Metal argument buffers
+# (newArgumentEncoderWithArguments). Real Macs don't, so only the test turns
+# them off.
+MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS=0 \
 "$exe" --config-dir "$work/config" --cache-dir "$work/cache" \
   --log-file "$log" --log-level info >"$work/output.log" 2>&1 &
 app_pid=$!
