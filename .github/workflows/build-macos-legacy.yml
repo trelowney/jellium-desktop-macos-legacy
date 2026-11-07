@@ -29,8 +29,8 @@ env:
   # The app bundler copies dependencies from here instead of `brew --prefix`.
   JFN_DEPS_PREFIX: /opt/local
   # Output of the build-macos-libs workflow; update both after running it.
-  LIBS_TAG: macos-libs-2026.11.07-42320157830
-  LIBS_SHA256: b836f2e3147ffbf8d3a428e758d5ee6d8c19120d7347974024c19e1ce2f32053
+  LIBS_TAG: macos-libs-2026.11.07-42371107329
+  LIBS_SHA256: c52fddbc4a087d9d452582f4385c1ab093b13084bf11955c0d559f079cf5c9d0
 
 jobs:
   build:
