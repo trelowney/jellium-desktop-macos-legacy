@@ -22,7 +22,7 @@ unsafe extern "C" {
 }
 
 /// True when VideoToolbox has a hardware decoder for `codec`.
-pub(crate) fn hardware_decodable(codec: &str) -> bool {
+fn hardware_decodable(codec: &str) -> bool {
     let Some(ty) = codec_type(codec) else {
         return false;
     };
@@ -31,5 +31,48 @@ pub(crate) fn hardware_decodable(codec: &str) -> bool {
             VTRegisterSupplementalVideoDecoderIfAvailable(ty);
         }
         VTIsHardwareDecodeSupported(ty) != 0
+    }
+}
+
+/// How long startup waits for VideoToolbox. On the first launch after a boot or
+/// an update it can block for a long time, which froze the app at startup.
+const QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// The `codecs` this Mac decodes in hardware, asked on a helper thread so a
+/// slow VideoToolbox can't hold up startup. When it doesn't answer within
+/// [`QUERY_TIMEOUT`], none of them count as hardware-decodable: the server
+/// converts them for this session, which plays everywhere.
+pub(crate) fn hardware_decodable_codecs(codecs: &[&'static str]) -> Vec<&'static str> {
+    let started = std::time::Instant::now();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let codecs = codecs.to_vec();
+    let spawned = std::thread::Builder::new()
+        .name("vt-query".into())
+        .spawn(move || {
+            let found: Vec<&'static str> =
+                codecs.into_iter().filter(|c| hardware_decodable(c)).collect();
+            let _ = tx.send(found);
+        });
+    if let Err(error) = spawned {
+        tracing::warn!(target: "Main", "VideoToolbox query: {error}");
+        return Vec::new();
+    }
+    match rx.recv_timeout(QUERY_TIMEOUT) {
+        Ok(found) => {
+            tracing::info!(
+                target: "Main",
+                "VideoToolbox answered in {} ms",
+                started.elapsed().as_millis()
+            );
+            found
+        }
+        Err(_) => {
+            tracing::warn!(
+                target: "Main",
+                "VideoToolbox did not answer in {} s; the server converts those codecs this session",
+                QUERY_TIMEOUT.as_secs()
+            );
+            Vec::new()
+        }
     }
 }

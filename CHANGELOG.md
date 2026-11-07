@@ -5,6 +5,11 @@ are published from the matching section below. Changes that come from the
 Windows build are listed in the
 [Jellium Desktop RTX changelog](https://github.com/trelowney/jellium-desktop-rtx/blob/main/CHANGELOG.md).
 
+## 2026-11-07.2
+
+### Fixed
+- **The first launch after starting the Mac, or after an update, froze and then quit.** At startup the app asks macOS which video formats this Mac decodes in hardware, and on a cold start that question could hang. It is now asked in the background and given 3 seconds; if macOS hasn't answered by then, the server converts HEVC, VP9 and AV1 video for that session, and the next launch asks again.
+
 ## 2026-11-07.1
 
 ### Fixed

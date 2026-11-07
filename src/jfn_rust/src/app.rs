@@ -345,10 +345,10 @@ fn publish_device_profile(mpv_raw: *mut jfn_mpv::sys::mpv_handle) {
         .collect();
     #[cfg(target_os = "macos")]
     if jfn_config::hw_direct_play_only() {
-        let dropped = jfn_jellyfin::retain_hw_decodable_video(
-            &mut decoders,
-            crate::hw_decode::hardware_decodable,
-        );
+        let hw = crate::hw_decode::hardware_decodable_codecs(jfn_jellyfin::HW_GATED_VIDEO_CODECS);
+        let dropped = jfn_jellyfin::retain_hw_decodable_video(&mut decoders, |c| {
+            hw.iter().any(|h| *h == c)
+        });
         tracing::info!(
             target: "Main",
             "Direct play limited to hardware-decodable video; left to the server: {}",
