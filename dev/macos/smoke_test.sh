@@ -52,7 +52,13 @@ if [ -n "$result" ]; then
   grep -v 'Device profile:' "$log" | tail -80 || true
   echo "--- app output"
   tail -40 "$work/output.log" || true
-  report=$(ls -t ~/Library/Logs/DiagnosticReports/*.ips 2>/dev/null | head -1)
+  # macOS writes the crash report a few seconds after the crash.
+  report=
+  for _ in $(seq 20); do
+    report=$(ls -t ~/Library/Logs/DiagnosticReports/ 2>/dev/null | grep -i -m1 '^jellium.*\.ips$' || true)
+    [ -n "$report" ] && report=~/Library/Logs/DiagnosticReports/$report && break
+    sleep 1
+  done
   if [ -n "$report" ]; then
     echo "--- crash report $report"
     python3 "$here/crash_summary.py" "$report" || true
