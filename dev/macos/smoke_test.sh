@@ -59,6 +59,9 @@ done
 if [ -z "$result" ] && ! grep -q 'Device profile:' "$log"; then
   result="startup did not publish the device profile"
 fi
+if [ -z "$result" ] && ! grep -q 'loading bundled scripts:.*monoupmix\.lua' "$log"; then
+  result="the bundled mpv scripts were not loaded"
+fi
 
 if [ -n "$result" ]; then
   echo "::error::Smoke test failed: $result"
