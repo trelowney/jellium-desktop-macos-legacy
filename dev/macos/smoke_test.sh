@@ -24,8 +24,17 @@ if [ -d /opt/local ]; then
 fi
 cleanup() {
   kill "${app_pid:-}" "${server_pid:-}" 2>/dev/null || true
+  # Let the app and its Chromium helpers finish writing the cache before it
+  # is removed; a helper still writing made rm fail with "Directory not empty".
+  for _ in $(seq 20); do
+    kill -0 "${app_pid:-}" 2>/dev/null || break
+    sleep 0.5
+  done
+  kill -9 "${app_pid:-}" 2>/dev/null || true
+  pkill -9 -f "$work" 2>/dev/null || true
+  wait 2>/dev/null || true
   if [ -n "$hidden" ]; then sudo mv /opt/local.smoke /opt/local; fi
-  rm -rf "$work"
+  rm -rf "$work" 2>/dev/null || { sleep 2; rm -rf "$work"; }
 }
 trap cleanup EXIT
 
