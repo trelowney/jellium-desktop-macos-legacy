@@ -5,6 +5,15 @@ are published from the matching section below. Changes that come from the
 Windows build are listed in the
 [Jellium Desktop RTX changelog](https://github.com/trelowney/jellium-desktop-rtx/blob/main/CHANGELOG.md).
 
+## 2026-11-15
+
+### Changed
+- **Based on the latest upstream jellium-desktop (`09de0a6`), still on Chromium 150 for macOS 12.** What it brings on the Mac:
+  - **The hardware decoding choice in Settings is kept.** A saved mode was dropped when the app started, so playback fell back to the default.
+  - **Mono audio plays on both speakers.**
+  - **One more guard against a startup freeze.** The app now waits until the player has applied the startup background color before it asks the player anything. That color change also waits for the main thread on macOS. The fix from 2026-11-07.3 stays in place.
+  - **Newer mpv and libplacebo** (7.387.0). The AirPods disconnect fix from 2026-10-16 is part of the new mpv.
+
 ## 2026-11-13
 
 ### Added

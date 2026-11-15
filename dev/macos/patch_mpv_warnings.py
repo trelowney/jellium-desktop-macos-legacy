@@ -8,10 +8,6 @@ change no longer applies, so a submodule update can't silently bring them back.
 import pathlib
 
 PATCHES = {
-    # Never mutated.
-    "osdep/mac/app_hub.swift": [
-        ("            var path = $0.absoluteString\n", "            let path = $0.absoluteString\n"),
-    ],
     # OpenGL surface properties, unused with Vulkan.
     "video/out/mac/view.swift": [
         ("        wantsBestResolutionOpenGLSurface = true\n", ""),
